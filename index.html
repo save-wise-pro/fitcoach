@@ -1,0 +1,2504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+<title>FitCoach — Personal Fitness Coaching</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          display: ['Space Grotesk', 'sans-serif'],
+          body: ['Inter', 'sans-serif'],
+        },
+        colors: {
+          emerald: {
+            400: '#34d399',
+            500: '#10b981',
+            600: '#059669',
+          }
+        }
+      }
+    }
+  }
+</script>
+<style>
+  body { font-family: 'Inter', sans-serif; }
+  .font-display { font-family: 'Space Grotesk', sans-serif; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  @keyframes fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .animate-fade-in { animation: fade-in 0.35s ease-out; }
+  .spinner { border: 2px solid rgba(15,23,42,0.12); border-top-color: #059669; border-radius: 50%; width: 18px; height: 18px; animation: spin 0.7s linear infinite; }
+  .spinner-light { border: 2px solid rgba(255,255,255,0.35); border-top-color: #ffffff; border-radius: 50%; width: 18px; height: 18px; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body class="bg-[#F5F4F0] text-slate-800 font-body min-h-screen">
+
+<!-- TOAST CONTAINER -->
+<div id="toast-root" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 w-[90%] max-w-sm"></div>
+
+<!-- APP ROOT -->
+<div id="app" class="min-h-screen flex flex-col"></div>
+
+<script>
+/* ============================================================
+   SUPABASE CONFIG
+============================================================ */
+const SUPABASE_URL = "https://hfblbtyvlmmisefykyqk.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhmYmxidHl2bG1taXNlZnlreXFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgyNTY2NTUsImV4cCI6MjEwMzgzMjY1NX0.S3PFCSMfhnMFGQZvn0rTMgEk4YjuCGGTaXDhijHc9yI";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* ============================================================
+   STATE
+============================================================ */
+let currentUser = null;   // auth.users row
+let currentProfile = null; // public.profiles row
+let cachedSetLogs = [];    // client's own workout_set_logs, refreshed on each dashboard render
+
+/* ============================================================
+   TOAST HELPER
+============================================================ */
+function toast(message, type = 'success') {
+  const root = document.getElementById('toast-root');
+  const colors = {
+    success: 'bg-emerald-600 text-white',
+    error: 'bg-red-500 text-white',
+    info: 'bg-slate-800 text-white'
+  };
+  const el = document.createElement('div');
+  el.className = `animate-fade-in ${colors[type]} px-4 py-3 rounded-xl shadow-lg text-sm font-medium`;
+  el.textContent = message;
+  root.appendChild(el);
+  setTimeout(() => {
+    el.style.transition = 'opacity 0.3s';
+    el.style.opacity = '0';
+    setTimeout(() => el.remove(), 300);
+  }, 3000);
+}
+
+/* ============================================================
+   RENDER: ROOT ROUTER
+============================================================ */
+async function render() {
+  const app = document.getElementById('app');
+  app.innerHTML = renderLoading();
+
+  const { data: { session } } = await sb.auth.getSession();
+
+  if (!session) {
+    currentUser = null;
+    currentProfile = null;
+    await renderAuthScreen();
+    return;
+  }
+
+  currentUser = session.user;
+
+  const { data: profile, error } = await sb
+    .from('profiles')
+    .select('*')
+    .eq('id', currentUser.id)
+    .single();
+
+  if (error || !profile) {
+    console.error(error);
+    await renderAuthScreen('Could not load your profile. Try signing in again.');
+    return;
+  }
+
+  currentProfile = profile;
+
+  // Touch last_active (fire and forget)
+  sb.from('profiles').update({ last_active: new Date().toISOString() }).eq('id', currentUser.id).then(() => {});
+
+  app.innerHTML = renderShell();
+  document.getElementById('logout-btn').addEventListener('click', handleLogout);
+
+  const outlet = document.getElementById('dashboard-outlet');
+  if (currentProfile.role === 'coach') {
+    await renderCoachDashboardStub();
+  } else {
+    await renderClientDashboardStub();
+  }
+}
+
+function renderLoading() {
+  return `
+    <div class="flex-1 flex items-center justify-center">
+      <div class="spinner"></div>
+    </div>
+  `;
+}
+
+/* ============================================================
+   RENDER: AUTH (LOGIN / SIGNUP)
+============================================================ */
+let authMode = 'login'; // 'login' | 'signup'
+let signupRole = 'client'; // 'client' | 'coach'
+let signupCoaches = []; // cached coach directory for the client signup dropdown
+
+async function renderAuthScreen(errorMsg = '') {
+  const app = document.getElementById('app');
+  if (authMode === 'signup' && signupRole === 'client' && !signupCoaches.length) {
+    const { data } = await sb.from('profiles').select('id,email,name').eq('role', 'coach').order('email');
+    signupCoaches = data || [];
+  }
+  app.innerHTML = renderAuth(errorMsg);
+  attachAuthHandlers();
+}
+
+function renderAuth(errorMsg = '') {
+  return `
+    <div class="flex-1 flex flex-col items-center justify-center px-6 py-10">
+      <div class="w-full max-w-sm animate-fade-in">
+        <div class="text-center mb-8">
+          <div class="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 mb-4">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2" stroke-linecap="round"><path d="M6.5 6.5l11 11M4 9l-2 2 4 4 2-2M20 15l2-2-4-4-2 2M9 4l2-2 4 4-2 2M15 20l-2 2-4-4 2-2"/></svg>
+          </div>
+          <h1 class="font-display text-2xl font-semibold text-slate-900"><span class="text-emerald-500">Fit</span>Coach</h1>
+          <p class="text-slate-500 text-sm mt-1">Coaching that follows you into the gym.</p>
+        </div>
+
+        <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-lg shadow-slate-200/60">
+          <div class="flex mb-6 bg-slate-100 rounded-xl p-1">
+            <button id="tab-login" class="flex-1 py-2 rounded-lg text-sm font-medium transition ${authMode === 'login' ? 'bg-emerald-500 text-white' : 'text-slate-500'}">Log in</button>
+            <button id="tab-signup" class="flex-1 py-2 rounded-lg text-sm font-medium transition ${authMode === 'signup' ? 'bg-emerald-500 text-white' : 'text-slate-500'}">Sign up</button>
+          </div>
+
+          ${errorMsg ? `<div class="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">${errorMsg}</div>` : ''}
+
+          <form id="auth-form" class="flex flex-col gap-4">
+            <div>
+              <label class="text-xs text-slate-500 mb-1 block">Email</label>
+              <input required type="email" id="auth-email" placeholder="you@example.com"
+                class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 mb-1 block">Password</label>
+              <input required type="password" id="auth-password" placeholder="••••••••" minlength="6"
+                class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+            </div>
+
+            ${authMode === 'signup' ? `
+            <div>
+              <label class="text-xs text-slate-500 mb-1 block">Phone (for WhatsApp check-ins)</label>
+              <input type="tel" id="auth-phone" placeholder="+1 555 123 4567"
+                class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 mb-1 block">I am a...</label>
+              <div class="flex gap-2">
+                <label class="flex-1 flex items-center justify-center gap-2 border border-slate-300 rounded-lg py-2.5 text-sm cursor-pointer has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 has-[:checked]:text-emerald-700">
+                  <input type="radio" name="role" value="client" ${signupRole === 'client' ? 'checked' : ''} class="accent-emerald-500" /> Client
+                </label>
+                <label class="flex-1 flex items-center justify-center gap-2 border border-slate-300 rounded-lg py-2.5 text-sm cursor-pointer has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 has-[:checked]:text-emerald-700">
+                  <input type="radio" name="role" value="coach" ${signupRole === 'coach' ? 'checked' : ''} class="accent-emerald-500" /> Coach
+                </label>
+              </div>
+            </div>
+            ${signupRole === 'client' ? `
+            <div>
+              <label class="text-xs text-slate-500 mb-1 block">Choose your coach</label>
+              <select required id="auth-coach"
+                class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500">
+                <option value="">Select a coach</option>
+                ${signupCoaches.map(c => `<option value="${escapeAttr(c.id)}">${escapeHtml(c.name || c.email)}</option>`).join('')}
+              </select>
+              ${!signupCoaches.length ? `<p class="text-xs text-amber-600 mt-1">No coaches have signed up yet — ask your coach to create their account first.</p>` : ''}
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 mb-1 block">Experience level</label>
+              <select id="auth-experience"
+                class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500">
+                <option value="">Prefer not to say</option>
+                <option value="beginner">Beginner</option>
+                <option value="intermediate">Intermediate</option>
+                <option value="advanced">Advanced</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 mb-1 block">Your goals (optional)</label>
+              <textarea id="auth-goals" rows="2" placeholder="e.g. Lose fat, build strength, train for a race..."
+                class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500 resize-none"></textarea>
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 mb-1 block">Injuries or limitations (optional)</label>
+              <textarea id="auth-injuries" rows="2" placeholder="e.g. Lower back sensitivity, knee surgery in 2022..."
+                class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500 resize-none"></textarea>
+            </div>
+            ` : ''}
+            ` : ''}
+
+            <button type="submit" id="auth-submit"
+              class="mt-2 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-2.5 text-sm transition flex items-center justify-center gap-2">
+              <span id="auth-submit-label">${authMode === 'login' ? 'Log in' : 'Create account'}</span>
+            </button>
+          </form>
+        </div>
+
+        <p class="text-center text-xs text-slate-500 mt-6">Your coach sets your workouts. You just show up.</p>
+      </div>
+    </div>
+  `;
+}
+
+function attachAuthHandlers() {
+  document.getElementById('tab-login').addEventListener('click', () => { authMode = 'login'; renderAuthScreen(); });
+  document.getElementById('tab-signup').addEventListener('click', () => { authMode = 'signup'; renderAuthScreen(); });
+  document.getElementById('auth-form').addEventListener('submit', handleAuthSubmit);
+  document.querySelectorAll('input[name="role"]').forEach(r => {
+    r.addEventListener('change', (e) => { signupRole = e.target.value; renderAuthScreen(); });
+  });
+}
+
+async function handleAuthSubmit(e) {
+  e.preventDefault();
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const submitBtn = document.getElementById('auth-submit');
+  const label = document.getElementById('auth-submit-label');
+
+  submitBtn.disabled = true;
+  const originalLabel = label.textContent;
+  label.innerHTML = `<span class="spinner-light inline-block align-middle"></span>`;
+
+  try {
+    if (authMode === 'signup') {
+      const phone = document.getElementById('auth-phone').value.trim();
+      const role = document.querySelector('input[name="role"]:checked').value;
+      const coachId = role === 'client' ? document.getElementById('auth-coach').value : '';
+      const experience = role === 'client' ? document.getElementById('auth-experience').value : '';
+      const goals = role === 'client' ? document.getElementById('auth-goals').value.trim() : '';
+      const injuries = role === 'client' ? document.getElementById('auth-injuries').value.trim() : '';
+
+      if (role === 'client' && !coachId) {
+        toast('Please select your coach.', 'info');
+        submitBtn.disabled = false;
+        label.textContent = originalLabel;
+        return;
+      }
+
+      const { data, error } = await sb.auth.signUp({
+        email,
+        password,
+        options: { data: { role, phone, coach_id: coachId, experience_level: experience, goals, injuries } }
+      });
+      if (error) throw error;
+
+      if (data.session) {
+        toast('Account created. Welcome!', 'success');
+        await render();
+      } else {
+        toast('Check your email to confirm your account.', 'info');
+        authMode = 'login';
+        renderAuthScreen();
+      }
+    } else {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      toast('Welcome back.', 'success');
+      await render();
+    }
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Something went wrong.', 'error');
+    submitBtn.disabled = false;
+    label.textContent = originalLabel;
+  }
+}
+
+async function handleLogout() {
+  await sb.auth.signOut();
+  toast('Logged out.', 'info');
+  render();
+}
+
+/* ============================================================
+   RENDER: APP SHELL (STICKY NAV + OUTLET)
+============================================================ */
+function renderShell() {
+  const roleBadge = currentProfile.role === 'coach'
+    ? `<span class="text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Coach</span>`
+    : `<span class="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200">Client</span>`;
+
+  return `
+    <header class="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-slate-200">
+      <div class="flex items-center justify-between px-4 py-3 max-w-2xl mx-auto">
+        <div class="flex items-center gap-2">
+          <span class="font-display font-semibold text-lg"><span class="text-emerald-500">Fit</span><span class="text-slate-900">Coach</span></span>
+          ${roleBadge}
+        </div>
+        <button id="logout-btn" class="text-xs text-slate-500 hover:text-red-600 transition px-3 py-1.5 rounded-lg border border-slate-300 hover:border-red-300">
+          Log out
+        </button>
+      </div>
+    </header>
+    <main class="flex-1 max-w-2xl mx-auto w-full px-4 py-6" id="dashboard-outlet"></main>
+  `;
+}
+
+/* ============================================================
+   CLIENT DASHBOARD
+============================================================ */
+function toDateStr(d) {
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function computeStreak(dateStrs, restDays = []) {
+  const activeSet = new Set(dateStrs);
+  const restSet = new Set(restDays);
+  let streak = 0;
+  const cursor = new Date();
+  if (!activeSet.has(toDateStr(cursor)) && !restSet.has(cursor.getDay())) cursor.setDate(cursor.getDate() - 1);
+  while (activeSet.has(toDateStr(cursor)) || restSet.has(cursor.getDay())) {
+    streak++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+function computeAdherence(dateStrs, restDays = [], windowDays = 7) {
+  const activeSet = new Set(dateStrs);
+  const restSet = new Set(restDays);
+  let expected = 0, completed = 0;
+  const cursor = new Date();
+  for (let i = 0; i < windowDays; i++) {
+    if (!restSet.has(cursor.getDay())) {
+      expected++;
+      if (activeSet.has(toDateStr(cursor))) completed++;
+    }
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return { completed, expected, pct: expected ? Math.round((completed / expected) * 100) : 100 };
+}
+
+// Weekly adherence % for each of the last N weeks, oldest first — for a trend chart.
+function computeAdherenceTrend(dateStrs, restDays = [], numWeeks = 4) {
+  const activeSet = new Set(dateStrs);
+  const restSet = new Set(restDays);
+  const weeks = [];
+  for (let w = numWeeks - 1; w >= 0; w--) {
+    let expected = 0, completed = 0;
+    for (let d = 0; d < 7; d++) {
+      const cursor = new Date();
+      cursor.setDate(cursor.getDate() - (w * 7 + d));
+      if (!restSet.has(cursor.getDay())) {
+        expected++;
+        if (activeSet.has(toDateStr(cursor))) completed++;
+      }
+    }
+    weeks.push(expected ? Math.round((completed / expected) * 100) : 100);
+  }
+  return weeks;
+}
+
+// "Since you joined" deltas: weight change from first to latest log, and best-lift change per exercise.
+function computeSinceJoined(logs, setLogs) {
+  const weightLogs = logs.filter(l => l.weight !== null && l.weight !== undefined).slice().sort((a, b) => new Date(a.logged_at) - new Date(b.logged_at));
+  const weightDelta = weightLogs.length >= 2 ? parseFloat((weightLogs[weightLogs.length - 1].weight - weightLogs[0].weight).toFixed(1)) : null;
+
+  const liftDeltas = [];
+  const exerciseNames = [...new Set(setLogs.filter(s => s.weight).map(s => s.exercise_name))];
+  exerciseNames.forEach(name => {
+    const points = progressionPoints(setLogs, name);
+    if (points.length >= 2) {
+      liftDeltas.push({ name, delta: parseFloat((points[points.length - 1].weight - points[0].weight).toFixed(1)) });
+    }
+  });
+  liftDeltas.sort((a, b) => b.delta - a.delta);
+
+  return { weightDelta, bestLiftGain: liftDeltas[0] || null };
+}
+
+function computeBadges({ logsCount, streak, hasPR, completionsCount, hasMeasurement, hasPhoto }) {
+  return [
+    { id: 'first_log', label: 'First log', icon: '📝', earned: logsCount >= 1 },
+    { id: 'week_streak', label: '7-day streak', icon: '🔥', earned: streak >= 7 },
+    { id: 'month_streak', label: '30-day streak', icon: '🔥🔥', earned: streak >= 30 },
+    { id: 'first_pr', label: 'First PR', icon: '🏆', earned: hasPR },
+    { id: 'ten_workouts', label: '10 workouts', icon: '💪', earned: completionsCount >= 10 },
+    { id: 'thirty_workouts', label: '30 workouts', icon: '💯', earned: completionsCount >= 30 },
+    { id: 'hundred_workouts', label: '100 workouts', icon: '🏅', earned: completionsCount >= 100 },
+    { id: 'first_measurement', label: 'First measurement', icon: '📏', earned: !!hasMeasurement },
+    { id: 'first_photo', label: 'First photo', icon: '📸', earned: !!hasPhoto }
+  ];
+}
+
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const SET_TYPE_LABELS = { warmup: 'Warmup', normal: 'Normal', drop: 'Drop', failure: 'Failure' };
+
+function epley1RM(weight, reps) {
+  if (!weight || !reps) return null;
+  return reps === 1 ? weight : weight * (1 + reps / 30);
+}
+
+// Best-effort max weight ever logged for an exercise, from a client's full set-log history.
+function maxWeightForExercise(setLogs, exerciseName) {
+  const relevant = setLogs.filter(s => s.exercise_name === exerciseName && s.weight);
+  if (!relevant.length) return null;
+  return Math.max(...relevant.map(s => parseFloat(s.weight)));
+}
+
+// One data point per day: the heaviest set logged that day for the given exercise.
+function progressionPoints(setLogs, exerciseName) {
+  const byDate = {};
+  setLogs.filter(s => s.exercise_name === exerciseName && s.weight).forEach(s => {
+    const w = parseFloat(s.weight);
+    if (!byDate[s.logged_date] || w > byDate[s.logged_date]) byDate[s.logged_date] = w;
+  });
+  return Object.entries(byDate).sort((a, b) => a[0].localeCompare(b[0])).map(([date, weight]) => ({ date, weight }));
+}
+
+function renderBadgesSection(badges) {
+  const earnedCount = badges.filter(b => b.earned).length;
+  return `
+    <section>
+      <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Achievements</h2>
+      <p class="text-sm text-slate-500 mb-4">${earnedCount}/${badges.length} unlocked</p>
+      <div class="grid grid-cols-3 sm:grid-cols-5 gap-3">
+        ${badges.map(b => `
+          <div class="flex flex-col items-center gap-1.5 text-center">
+            <div class="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl ${b.earned ? 'bg-emerald-50 border border-emerald-200' : 'bg-slate-100 border border-slate-200 opacity-40'}">${b.icon}</div>
+            <p class="text-[11px] leading-tight ${b.earned ? 'text-slate-700 font-medium' : 'text-slate-400'}">${b.label}</p>
+          </div>
+        `).join('')}
+      </div>
+    </section>
+  `;
+}
+
+async function renderClientDashboardStub() {
+  const outlet = document.getElementById('dashboard-outlet');
+  outlet.innerHTML = renderLoading();
+  const todayStr = toDateStr(new Date());
+
+  const [workoutsRes, logsRes, completionsRes, photosRes, setLogsRes] = await Promise.all([
+    sb.from('workouts').select('*').eq('client_id', currentUser.id).order('created_at', { ascending: false }),
+    sb.from('progress_logs').select('*').eq('client_id', currentUser.id).order('logged_at', { ascending: false }).limit(30),
+    sb.from('workout_completions').select('*').eq('client_id', currentUser.id).order('completed_date', { ascending: false }).limit(120),
+    sb.from('progress_photos').select('*').eq('client_id', currentUser.id).order('taken_at', { ascending: false }).limit(12),
+    sb.from('workout_set_logs').select('*').eq('client_id', currentUser.id).order('logged_date', { ascending: false }).limit(500)
+  ]);
+
+  if (workoutsRes.error) {
+    console.error(workoutsRes.error);
+    outlet.innerHTML = `<div class="text-center text-sm text-red-600 py-10">Couldn't load your workouts. Pull to refresh.</div>`;
+    return;
+  }
+
+  const workouts = workoutsRes.data || [];
+  const logs = logsRes.data || [];
+  const completions = completionsRes.data || [];
+  const photos = photosRes.data || [];
+  cachedSetLogs = setLogsRes.data || [];
+  const todaySetLogsByWorkout = {};
+  cachedSetLogs.filter(s => s.logged_date === todayStr).forEach(s => {
+    (todaySetLogsByWorkout[s.workout_id] = todaySetLogsByWorkout[s.workout_id] || []).push(s);
+  });
+  const loggedExercises = [...new Set(cachedSetLogs.filter(s => s.weight).map(s => s.exercise_name))].sort();
+  const feedbackLogs = logs.filter(l => l.coach_feedback).slice(0, 5);
+  const todayDoneIds = new Set(completions.filter(c => c.completed_date === todayStr).map(c => c.workout_id));
+  const restDays = currentProfile.rest_days || [];
+  const isRestDayToday = restDays.includes(new Date().getDay());
+
+  const streakDates = [...new Set([
+    ...logs.map(l => toDateStr(new Date(l.logged_at))),
+    ...completions.map(c => c.completed_date)
+  ])];
+  const streak = computeStreak(streakDates, restDays);
+  const adherence = computeAdherence(streakDates, restDays, 7);
+  const sinceJoined = computeSinceJoined(logs, cachedSetLogs);
+  const badges = computeBadges({
+    logsCount: logs.length,
+    streak,
+    hasPR: logs.some(l => l.pr_notes),
+    completionsCount: completions.length,
+    hasMeasurement: logs.some(l => l.waist_cm || l.chest_cm || l.hips_cm || l.arms_cm),
+    hasPhoto: photos.length > 0
+  });
+
+  const todayDow = new Date().getDay();
+  const todaysWorkouts = workouts.filter(w => !w.days_of_week || !w.days_of_week.length || w.days_of_week.includes(todayDow));
+  const hasAnySchedule = workouts.some(w => w.days_of_week && w.days_of_week.length);
+  const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 6);
+  const weekAgoStr = toDateStr(weekAgo);
+  const setsThisWeek = cachedSetLogs.filter(s => s.logged_date >= weekAgoStr).length;
+
+  outlet.innerHTML = `
+    <div class="animate-fade-in flex flex-col gap-8 pb-24">
+      <section>
+        <div class="flex items-center justify-between gap-2 mb-1">
+          <h2 class="font-display text-lg font-semibold text-slate-900">Today's plan</h2>
+          <div class="shrink-0 flex items-center gap-2">
+            ${streak > 0 ? `<span class="flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-1">🔥 ${streak}</span>` : ''}
+            <span class="flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2.5 py-1">${adherence.completed}/${adherence.expected} this week</span>
+          </div>
+        </div>
+        <p class="text-sm text-slate-500 mb-4">Assigned by your coach.</p>
+        ${isRestDayToday ? `
+          <div class="text-center py-6 border border-slate-200 bg-slate-50 rounded-2xl mb-3">
+            <p class="text-sm font-medium text-slate-700">🌙 Today's a scheduled rest day</p>
+            <p class="text-xs text-slate-500 mt-1">Recover well — your streak stays safe.</p>
+          </div>
+        ` : ''}
+        <div class="flex flex-col gap-3">
+          ${todaysWorkouts.length ? todaysWorkouts.map(w => renderWorkoutCard(w, todayDoneIds.has(w.id), todaySetLogsByWorkout[w.id] || [])).join('') : renderEmptyWorkouts()}
+        </div>
+      </section>
+
+      ${hasAnySchedule ? `
+      <section>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Weekly schedule</h2>
+        <p class="text-sm text-slate-500 mb-4">What's assigned across your week.</p>
+        ${renderWeeklySchedule(workouts, restDays)}
+      </section>
+      ` : ''}
+
+      ${loggedExercises.length ? `
+      <section>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Your lifts</h2>
+        <p class="text-sm text-slate-500 mb-4">Progression by exercise, from your logged sets.</p>
+        ${renderLiftProgressionPicker(loggedExercises, cachedSetLogs)}
+      </section>
+      ` : ''}
+
+      <section>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Your progress</h2>
+        <p class="text-sm text-slate-500 mb-4">How things are trending overall.</p>
+        <div class="flex flex-col gap-3">
+          ${renderSinceJoinedCard(sinceJoined)}
+          ${renderAdherenceTrendSection(streakDates, restDays)}
+        </div>
+      </section>
+
+      ${feedbackLogs.length ? `
+      <section>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Coach feedback</h2>
+        <p class="text-sm text-slate-500 mb-4">Notes on your recent logs.</p>
+        <div class="flex flex-col gap-3">
+          ${feedbackLogs.map(renderFeedbackCard).join('')}
+        </div>
+      </section>
+      ` : ''}
+
+      ${renderBadgesSection(badges)}
+
+      <section>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Your week</h2>
+        <p class="text-sm text-slate-500 mb-4">A shareable snapshot of this week.</p>
+        ${renderWeeklyRecapCard({ streak, adherence, badges, setsThisWeek, clientName: currentProfile.name || currentUser.email })}
+      </section>
+
+      <section>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Log today</h2>
+        <p class="text-sm text-slate-500 mb-4">All fields optional — log whatever you've got.</p>
+        ${renderLogForm()}
+      </section>
+
+      <section>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Progress photos</h2>
+        <p class="text-sm text-slate-500 mb-4">Optional — snap your progress over time.</p>
+        ${renderPhotoUploadForm()}
+        ${photos.length ? `
+          <div class="grid grid-cols-3 gap-2 mt-4">
+            ${photos.map(renderPhotoThumb).join('')}
+          </div>
+        ` : ''}
+        ${renderPhotoCompareSection(photos)}
+      </section>
+
+      <section>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Your history</h2>
+        <p class="text-sm text-slate-500 mb-4">Recent logs.</p>
+        <div class="flex flex-col gap-3">
+          ${logs.length ? logs.slice(0, 10).map(renderClientHistoryRow).join('') : `
+            <div class="text-center py-8 border border-dashed border-slate-300 rounded-2xl text-sm text-slate-400">No logs yet — save one above.</div>
+          `}
+        </div>
+      </section>
+    </div>
+  `;
+
+  const logForm = document.getElementById('log-form');
+  if (logForm) logForm.addEventListener('submit', handleLogSubmit);
+  const downloadRecapBtn = document.getElementById('download-recap-btn');
+  if (downloadRecapBtn) downloadRecapBtn.addEventListener('click', handleDownloadRecap);
+  const photoForm = document.getElementById('photo-form');
+  if (photoForm) photoForm.addEventListener('submit', handlePhotoUpload);
+  document.querySelectorAll('[data-toggle-complete]').forEach(cb => {
+    cb.addEventListener('change', (e) => handleToggleComplete(e.target.dataset.toggleComplete, e.target.checked));
+  });
+  document.querySelectorAll('[data-toggle-sets]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const panel = document.getElementById(`sets-panel-${btn.dataset.toggleSets}`);
+      panel.classList.toggle('hidden');
+    });
+  });
+  document.querySelectorAll('[data-save-sets]').forEach(btn => {
+    btn.addEventListener('click', () => handleSaveSets(btn.dataset.saveSets));
+  });
+  document.querySelectorAll('[data-rest-adjust]').forEach(btn => {
+    btn.addEventListener('click', () => adjustRestDuration(btn.dataset.restAdjust, parseInt(btn.dataset.delta, 10)));
+  });
+  document.querySelectorAll('[data-start-rest]').forEach(btn => {
+    btn.addEventListener('click', () => startRestTimer(btn.dataset.startRest));
+  });
+  const liftPicker = document.getElementById('lift-picker');
+  if (liftPicker) liftPicker.addEventListener('change', () => renderLiftChart(liftPicker.value, cachedSetLogs));
+  if (loggedExercises.length) renderLiftChart(loggedExercises[0], cachedSetLogs);
+  initPhotoCompareSlider(photos);
+}
+
+function renderWeeklyRecapCard({ streak, adherence, badges, setsThisWeek, clientName }) {
+  const earnedThisSession = badges.filter(b => b.earned).length;
+  return `
+    <div id="weekly-recap-card" class="rounded-2xl p-6 text-white" style="background: linear-gradient(135deg, #059669, #10b981);">
+      <p class="text-xs uppercase tracking-wide opacity-80">FitCoach · Weekly Recap</p>
+      <h3 class="font-display text-xl font-semibold mt-1">${escapeHtml(clientName)}</h3>
+      <div class="grid grid-cols-2 gap-3 mt-4">
+        <div class="bg-white/15 rounded-xl p-3">
+          <p class="text-2xl font-semibold">🔥 ${streak}</p>
+          <p class="text-xs opacity-80 mt-0.5">Day streak</p>
+        </div>
+        <div class="bg-white/15 rounded-xl p-3">
+          <p class="text-2xl font-semibold">${adherence.completed}/${adherence.expected}</p>
+          <p class="text-xs opacity-80 mt-0.5">Training days hit</p>
+        </div>
+        <div class="bg-white/15 rounded-xl p-3">
+          <p class="text-2xl font-semibold">${setsThisWeek}</p>
+          <p class="text-xs opacity-80 mt-0.5">Sets logged</p>
+        </div>
+        <div class="bg-white/15 rounded-xl p-3">
+          <p class="text-2xl font-semibold">${earnedThisSession}/${badges.length}</p>
+          <p class="text-xs opacity-80 mt-0.5">Badges earned</p>
+        </div>
+      </div>
+    </div>
+    <button id="download-recap-btn" class="w-full mt-3 text-sm font-medium text-emerald-700 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg py-2.5 transition">
+      📸 Download as image
+    </button>
+  `;
+}
+
+function handleDownloadRecap() {
+  const card = document.getElementById('weekly-recap-card');
+  if (!card || typeof html2canvas === 'undefined') { toast('Could not generate image right now.', 'error'); return; }
+  html2canvas(card, { backgroundColor: null, scale: 2 }).then(canvas => {
+    const link = document.createElement('a');
+    link.download = 'my-week.png';
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  }).catch(err => {
+    console.error(err);
+    toast('Could not generate image.', 'error');
+  });
+}
+
+function renderFeedbackCard(log) {
+  const date = new Date(log.logged_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return `
+    <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-4">
+      <p class="text-xs text-emerald-700 font-medium mb-1">On your ${escapeHtml(date)} log</p>
+      <p class="text-sm text-slate-800">${escapeHtml(log.coach_feedback)}</p>
+    </div>
+  `;
+}
+
+function renderClientHistoryRow(log) {
+  const date = new Date(log.logged_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const metrics = [log.weight ? `${log.weight}kg` : null, log.water_liters ? `${log.water_liters}L water` : null].filter(Boolean).join(' · ');
+  const measurements = [
+    log.waist_cm ? `Waist ${log.waist_cm}cm` : null,
+    log.chest_cm ? `Chest ${log.chest_cm}cm` : null,
+    log.hips_cm ? `Hips ${log.hips_cm}cm` : null,
+    log.arms_cm ? `Arms ${log.arms_cm}cm` : null
+  ].filter(Boolean).join(' · ');
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-1">
+      <div class="flex items-center justify-between">
+        <p class="text-xs text-slate-500">${escapeHtml(date)}</p>
+        ${metrics ? `<p class="text-xs font-medium text-slate-700">${escapeHtml(metrics)}</p>` : ''}
+      </div>
+      ${measurements ? `<p class="text-xs text-slate-500">${escapeHtml(measurements)}</p>` : ''}
+      ${log.pr_notes ? `<p class="text-sm text-slate-800">${escapeHtml(log.pr_notes)}</p>` : ''}
+    </div>
+  `;
+}
+
+function renderPhotoUploadForm() {
+  return `
+    <form id="photo-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-3">
+      <input type="file" accept="image/*" id="photo-file"
+        class="text-sm text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 file:text-sm file:font-medium hover:file:bg-emerald-100" />
+      <input type="text" id="photo-note" placeholder="Optional note, e.g. Week 4"
+        class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+      <button type="submit" id="photo-submit"
+        class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-2.5 text-sm transition flex items-center justify-center gap-2">
+        <span id="photo-submit-label">Upload photo</span>
+      </button>
+    </form>
+  `;
+}
+
+function renderPhotoThumb(p) {
+  return `
+    <a href="${escapeAttr(p.photo_url)}" target="_blank" rel="noopener noreferrer" class="block aspect-square rounded-lg overflow-hidden border border-slate-200 bg-slate-100">
+      <img src="${escapeAttr(p.photo_url)}" class="w-full h-full object-cover" loading="lazy" alt="Progress photo" />
+    </a>
+  `;
+}
+
+function renderPhotoCompareSection(photos) {
+  if (photos.length < 2) return '';
+  // photos arrive newest-first; default to oldest vs newest
+  const oldest = photos[photos.length - 1];
+  const newest = photos[0];
+  const options = photos.map(p => `<option value="${escapeAttr(p.id)}">${escapeHtml(new Date(p.taken_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))}${p.note ? ` — ${escapeHtml(p.note)}` : ''}</option>`).join('');
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm mt-4">
+      <p class="text-xs text-slate-500 mb-3">Drag the slider to compare two photos.</p>
+      <div class="flex gap-2 mb-3">
+        <select id="compare-before-select" class="flex-1 text-xs bg-slate-50 border border-slate-300 rounded-lg px-2 py-2 text-slate-600">
+          ${photos.map(p => `<option value="${escapeAttr(p.id)}" ${p.id === oldest.id ? 'selected' : ''}>${escapeHtml(new Date(p.taken_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))}${p.note ? ` — ${escapeHtml(p.note)}` : ''}</option>`).join('')}
+        </select>
+        <select id="compare-after-select" class="flex-1 text-xs bg-slate-50 border border-slate-300 rounded-lg px-2 py-2 text-slate-600">
+          ${photos.map(p => `<option value="${escapeAttr(p.id)}" ${p.id === newest.id ? 'selected' : ''}>${escapeHtml(new Date(p.taken_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))}${p.note ? ` — ${escapeHtml(p.note)}` : ''}</option>`).join('')}
+        </select>
+      </div>
+      <div id="compare-viewport" class="relative w-full rounded-xl overflow-hidden bg-slate-100" style="aspect-ratio:1;">
+        <img id="compare-before-img" src="${escapeAttr(oldest.photo_url)}" class="absolute inset-0 w-full h-full object-cover" />
+        <div id="compare-after-wrap" class="absolute inset-0 overflow-hidden" style="width:50%;">
+          <img id="compare-after-img" src="${escapeAttr(newest.photo_url)}" class="absolute inset-0 h-full object-cover" style="width:var(--compare-w);max-width:none;" />
+        </div>
+        <div id="compare-handle" class="absolute top-0 bottom-0 w-0.5 bg-white shadow" style="left:50%;"></div>
+      </div>
+      <input type="range" id="compare-slider" min="0" max="100" value="50" class="w-full mt-3 accent-emerald-500" />
+    </div>
+  `;
+}
+
+function initPhotoCompareSlider(photos) {
+  const viewport = document.getElementById('compare-viewport');
+  const slider = document.getElementById('compare-slider');
+  if (!viewport || !slider) return;
+  const beforeImg = document.getElementById('compare-before-img');
+  const afterImg = document.getElementById('compare-after-img');
+  const afterWrap = document.getElementById('compare-after-wrap');
+  const handle = document.getElementById('compare-handle');
+  const beforeSelect = document.getElementById('compare-before-select');
+  const afterSelect = document.getElementById('compare-after-select');
+
+  const syncWidth = () => { afterImg.style.width = `${viewport.clientWidth}px`; };
+  syncWidth();
+  window.addEventListener('resize', syncWidth);
+
+  slider.addEventListener('input', () => {
+    afterWrap.style.width = `${slider.value}%`;
+    handle.style.left = `${slider.value}%`;
+  });
+
+  beforeSelect.addEventListener('change', () => {
+    const p = photos.find(ph => ph.id === beforeSelect.value);
+    if (p) beforeImg.src = p.photo_url;
+  });
+  afterSelect.addEventListener('change', () => {
+    const p = photos.find(ph => ph.id === afterSelect.value);
+    if (p) { afterImg.src = p.photo_url; syncWidth(); }
+  });
+}
+
+async function handlePhotoUpload(e) {
+  e.preventDefault();
+  const fileInput = document.getElementById('photo-file');
+  const file = fileInput.files[0];
+  if (!file) { toast('Choose a photo first.', 'info'); return; }
+
+  const submitBtn = document.getElementById('photo-submit');
+  const label = document.getElementById('photo-submit-label');
+  submitBtn.disabled = true;
+  const originalLabel = label.textContent;
+  label.innerHTML = `<span class="spinner-light inline-block align-middle"></span>`;
+
+  try {
+    const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+    const path = `${currentUser.id}/${Date.now()}-${safeName}`;
+    const { error: upErr } = await sb.storage.from('progress-photos').upload(path, file);
+    if (upErr) throw upErr;
+
+    const { data: urlData } = sb.storage.from('progress-photos').getPublicUrl(path);
+    const { error: insErr } = await sb.from('progress_photos').insert({
+      client_id: currentUser.id,
+      photo_url: urlData.publicUrl,
+      note: document.getElementById('photo-note').value.trim() || null
+    });
+    if (insErr) throw insErr;
+
+    toast('Photo uploaded.', 'success');
+    await renderClientDashboardStub();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not upload photo.', 'error');
+    submitBtn.disabled = false;
+    label.textContent = originalLabel;
+  }
+}
+
+async function handleToggleComplete(workoutId, checked) {
+  try {
+    if (checked) {
+      const { error } = await sb.from('workout_completions').upsert(
+        { workout_id: workoutId, client_id: currentUser.id, completed_date: toDateStr(new Date()) },
+        { onConflict: 'workout_id,completed_date' }
+      );
+      if (error) throw error;
+    } else {
+      const { error } = await sb.from('workout_completions').delete()
+        .eq('workout_id', workoutId).eq('completed_date', toDateStr(new Date()));
+      if (error) throw error;
+    }
+    await renderClientDashboardStub();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not update.', 'error');
+  }
+}
+
+function renderSinceJoinedCard(since) {
+  if (since.weightDelta === null && !since.bestLiftGain) return '';
+  const parts = [];
+  if (since.weightDelta !== null) {
+    const arrow = since.weightDelta < 0 ? '↓' : since.weightDelta > 0 ? '↑' : '→';
+    parts.push(`<span class="font-medium text-slate-900">${arrow} ${Math.abs(since.weightDelta)}kg</span> body weight`);
+  }
+  if (since.bestLiftGain && since.bestLiftGain.delta > 0) {
+    parts.push(`<span class="font-medium text-emerald-700">+${since.bestLiftGain.delta}kg</span> on ${escapeHtml(since.bestLiftGain.name)}`);
+  }
+  if (!parts.length) return '';
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+      <p class="text-xs text-slate-500 mb-1">Since you joined</p>
+      <p class="text-sm text-slate-700">${parts.join(' · ')}</p>
+    </div>
+  `;
+}
+
+function renderAdherenceTrendSection(dateStrs, restDays) {
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-xs text-slate-500">Adherence trend</p>
+        <select id="adherence-weeks-select" class="text-xs bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-slate-600">
+          <option value="4">Last 4 weeks</option>
+          <option value="8">Last 8 weeks</option>
+          <option value="12">Last 12 weeks</option>
+        </select>
+      </div>
+      <div id="adherence-trend-outlet"></div>
+    </div>
+  `;
+}
+
+function renderAdherenceTrendChart(dateStrs, restDays, numWeeks) {
+  const outlet = document.getElementById('adherence-trend-outlet');
+  if (!outlet) return;
+  const weekly = computeAdherenceTrend(dateStrs, restDays, numWeeks);
+  const w = 320, h = 70, barGap = 3;
+  const barWidth = (w - barGap * (numWeeks - 1)) / numWeeks;
+  const bars = weekly.map((pct, i) => {
+    const barHeight = Math.max(2, (pct / 100) * (h - 4));
+    const x = i * (barWidth + barGap);
+    const y = h - barHeight;
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barHeight.toFixed(1)}" rx="2" fill="#10b981" />`;
+  }).join('');
+  outlet.innerHTML = `
+    <svg viewBox="0 0 ${w} ${h}" class="w-full" style="height: 70px" preserveAspectRatio="none">${bars}</svg>
+    <p class="text-xs text-slate-500 mt-2">Avg ${Math.round(weekly.reduce((a, b) => a + b, 0) / weekly.length)}% over ${numWeeks} weeks</p>
+  `;
+}
+
+function renderWeeklySchedule(workouts, restDays = []) {
+  const days = WEEKDAY_LABELS.map((lbl, i) => {
+    const isRest = restDays.includes(i);
+    const dayWorkouts = workouts.filter(w => !w.days_of_week || !w.days_of_week.length || w.days_of_week.includes(i));
+    const isToday = i === new Date().getDay();
+    return `
+      <div class="flex gap-3 ${isToday ? 'bg-emerald-50 -mx-2 px-2 rounded-lg' : ''} py-2">
+        <div class="w-10 shrink-0 text-xs font-medium ${isToday ? 'text-emerald-700' : 'text-slate-500'} pt-0.5">${lbl}</div>
+        <div class="flex-1 min-w-0">
+          ${isRest ? `<span class="text-xs text-slate-400">🌙 Rest day</span>` : dayWorkouts.length ? `
+            <div class="flex flex-wrap gap-1.5">
+              ${dayWorkouts.map(w => `<span class="text-xs bg-white border border-slate-200 rounded-full px-2 py-0.5 text-slate-700">${escapeHtml(w.day_label ? `${w.day_label}: ` : '')}${escapeHtml(w.exercise_name)}</span>`).join('')}
+            </div>
+          ` : `<span class="text-xs text-slate-300">—</span>`}
+        </div>
+      </div>
+    `;
+  }).join('');
+  return `<div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm divide-y divide-slate-100">${days}</div>`;
+}
+
+function renderWorkoutCard(w, isDone, todaySetLogs = []) {
+  const setsById = {};
+  todaySetLogs.forEach(s => { setsById[s.set_number] = s; });
+  const rows = Array.from({ length: w.sets }, (_, i) => i + 1).map(setNum => {
+    const existing = setsById[setNum];
+    return `
+      <div class="grid grid-cols-[auto_1fr_1fr_1fr] gap-2 items-center">
+        <span class="text-xs text-slate-400 w-5">${setNum}</span>
+        <input type="number" step="0.5" min="0" placeholder="kg" data-set-weight="${setNum}"
+          value="${existing && existing.weight !== null ? existing.weight : ''}"
+          class="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60" />
+        <input type="number" step="1" min="0" placeholder="reps" data-set-reps="${setNum}"
+          value="${existing && existing.reps !== null ? existing.reps : ''}"
+          class="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60" />
+        <select data-set-type="${setNum}" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-1.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/60">
+          ${Object.entries(SET_TYPE_LABELS).map(([val, lbl]) => `<option value="${val}" ${existing && existing.set_type === val ? 'selected' : (!existing && val === 'normal' ? 'selected' : '')}>${lbl}</option>`).join('')}
+        </select>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <h3 class="font-medium text-slate-900 text-sm truncate">${escapeHtml(w.exercise_name)}</h3>
+            ${w.day_label ? `<span class="text-[10px] font-medium bg-slate-100 text-slate-600 rounded-full px-2 py-0.5">${escapeHtml(w.day_label)}</span>` : ''}
+          </div>
+          <div class="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-slate-400">
+            <span><span class="text-slate-500">Sets</span> <span class="text-slate-700">${w.sets}</span></span>
+            <span><span class="text-slate-500">Reps</span> <span class="text-slate-700">${escapeHtml(w.target_reps)}</span></span>
+            ${w.target_weight ? `<span><span class="text-slate-500">Weight</span> <span class="text-slate-700">${escapeHtml(w.target_weight)}</span></span>` : ''}
+          </div>
+          ${w.instructions ? `<p class="text-xs text-slate-500 mt-2 italic">${escapeHtml(w.instructions)}</p>` : ''}
+        </div>
+        ${w.video_url ? `
+          <a href="${escapeAttr(w.video_url)}" target="_blank" rel="noopener noreferrer"
+            class="shrink-0 flex items-center gap-1.5 bg-emerald-500/10 text-emerald-700 border border-emerald-200 hover:bg-emerald-500/20 transition rounded-lg px-3 py-2 text-xs font-medium">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            Watch
+          </a>
+        ` : ''}
+      </div>
+
+      <div class="flex items-center justify-between gap-2 mt-3 pt-3 border-t border-slate-100">
+        <label class="flex items-center gap-2 text-sm cursor-pointer ${isDone ? 'text-emerald-700' : 'text-slate-500'}">
+          <input type="checkbox" data-toggle-complete="${w.id}" ${isDone ? 'checked' : ''} class="accent-emerald-500 w-4 h-4" />
+          ${isDone ? 'Done today ✓' : 'Mark done today'}
+        </label>
+        <button data-toggle-sets="${w.id}" class="text-xs font-medium text-emerald-700 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg px-2.5 py-1.5 transition">
+          ${todaySetLogs.length ? 'Edit sets' : 'Log sets'}
+        </button>
+      </div>
+
+      <div id="sets-panel-${w.id}" class="${todaySetLogs.length ? '' : 'hidden'} mt-3 pt-3 border-t border-slate-100 flex flex-col gap-2">
+        <div class="grid grid-cols-[auto_1fr_1fr_1fr] gap-2 text-[10px] text-slate-400 px-0.5">
+          <span></span><span>Weight</span><span>Reps</span><span>Type</span>
+        </div>
+        ${rows}
+        <button data-save-sets="${w.id}" data-exercise-name="${escapeAttr(w.exercise_name)}"
+          class="mt-1 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-2 text-xs transition flex items-center justify-center gap-2">
+          <span id="save-sets-label-${w.id}">Save sets</span>
+        </button>
+        <div class="flex items-center justify-between gap-2 mt-1 pt-2 border-t border-slate-100">
+          <div class="flex items-center gap-1.5">
+            <button data-rest-adjust="${w.id}" data-delta="-15" class="w-6 h-6 rounded-full border border-slate-300 text-slate-500 text-xs leading-none">–</button>
+            <span id="rest-duration-${w.id}" class="text-xs text-slate-600 w-9 text-center">90s</span>
+            <button data-rest-adjust="${w.id}" data-delta="15" class="w-6 h-6 rounded-full border border-slate-300 text-slate-500 text-xs leading-none">+</button>
+          </div>
+          <button id="rest-btn-${w.id}" data-start-rest="${w.id}" class="text-xs font-medium text-emerald-700 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg px-3 py-1.5 transition">
+            ⏱ Start rest
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+const restTimerState = {}; // workoutId -> { duration, intervalId }
+
+function adjustRestDuration(workoutId, delta) {
+  const state = restTimerState[workoutId] || (restTimerState[workoutId] = { duration: 90, intervalId: null });
+  state.duration = Math.max(15, Math.min(300, state.duration + delta));
+  const el = document.getElementById(`rest-duration-${workoutId}`);
+  if (el) el.textContent = `${state.duration}s`;
+}
+
+function startRestTimer(workoutId) {
+  const state = restTimerState[workoutId] || (restTimerState[workoutId] = { duration: 90, intervalId: null });
+  if (state.intervalId) { clearInterval(state.intervalId); state.intervalId = null; }
+  let remaining = state.duration;
+  const btn = document.getElementById(`rest-btn-${workoutId}`);
+  if (!btn) return;
+  btn.textContent = `⏱ ${remaining}s`;
+  state.intervalId = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) {
+      clearInterval(state.intervalId);
+      state.intervalId = null;
+      btn.textContent = '⏱ Start rest';
+      toast('Rest over — next set! 💪', 'success');
+      if (navigator.vibrate) navigator.vibrate(250);
+    } else {
+      btn.textContent = `⏱ ${remaining}s`;
+    }
+  }, 1000);
+}
+
+function renderLiftProgressionPicker(exercises, setLogs) {
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+      <select id="lift-picker" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 mb-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/60">
+        ${exercises.map(ex => `<option value="${escapeAttr(ex)}">${escapeHtml(ex)}</option>`).join('')}
+      </select>
+      <div id="lift-chart-outlet"></div>
+    </div>
+  `;
+}
+
+function renderLiftChart(exerciseName, setLogs) {
+  const outlet = document.getElementById('lift-chart-outlet');
+  if (!outlet) return;
+  const points = progressionPoints(setLogs, exerciseName);
+  if (points.length < 2) {
+    const best = points[0];
+    outlet.innerHTML = `<p class="text-sm text-slate-500 text-center py-4">Log this exercise a couple more times to see a trend${best ? ` — best so far: ${best.weight}kg` : ''}.</p>`;
+    return;
+  }
+  const bestPoint = points.reduce((a, b) => (b.weight > a.weight ? b : a));
+  const bestSet = setLogs.find(s => s.exercise_name === exerciseName && parseFloat(s.weight) === bestPoint.weight && s.reps);
+  const oneRM = bestSet ? epley1RM(bestPoint.weight, bestSet.reps) : null;
+  outlet.innerHTML = `
+    <svg viewBox="0 0 320 80" class="w-full h-20" preserveAspectRatio="none">
+      <polyline points="${(() => {
+        const weights = points.map(p => p.weight);
+        const min = Math.min(...weights), max = Math.max(...weights), range = max - min || 1;
+        return weights.map((val, i) => {
+          const x = 8 + (i / (weights.length - 1)) * (320 - 16);
+          const y = 8 + (1 - (val - min) / range) * (80 - 16);
+          return `${x.toFixed(1)},${y.toFixed(1)}`;
+        }).join(' ');
+      })()}" fill="none" stroke="#10b981" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+    </svg>
+    <p class="text-xs text-slate-500 mt-2">Best lift: <span class="font-medium text-slate-700">${bestPoint.weight}kg</span>${oneRM ? ` · Est. 1RM: <span class="font-medium text-slate-700">${oneRM.toFixed(1)}kg</span>` : ''}</p>
+  `;
+}
+
+async function handleSaveSets(workoutId) {
+  const label = document.getElementById(`save-sets-label-${workoutId}`);
+  const btn = document.querySelector(`[data-save-sets="${workoutId}"]`);
+  const exerciseName = btn.dataset.exerciseName;
+  const panel = document.getElementById(`sets-panel-${workoutId}`);
+  const todayStr = toDateStr(new Date());
+
+  const rows = [];
+  panel.querySelectorAll('[data-set-weight]').forEach(input => {
+    const setNum = parseInt(input.dataset.setWeight, 10);
+    const weight = input.value ? parseFloat(input.value) : null;
+    const repsInput = panel.querySelector(`[data-set-reps="${setNum}"]`);
+    const typeInput = panel.querySelector(`[data-set-type="${setNum}"]`);
+    const reps = repsInput.value ? parseInt(repsInput.value, 10) : null;
+    if (weight !== null || reps !== null) {
+      rows.push({ set_number: setNum, weight, reps, set_type: typeInput.value });
+    }
+  });
+
+  if (!rows.length) {
+    toast('Enter at least one set before saving.', 'info');
+    return;
+  }
+
+  btn.disabled = true;
+  const originalLabel = label.textContent;
+  label.innerHTML = `<span class="spinner-light inline-block align-middle"></span>`;
+
+  try {
+    const priorMax = maxWeightForExercise(cachedSetLogs, exerciseName);
+
+    await sb.from('workout_set_logs').delete().eq('workout_id', workoutId).eq('logged_date', todayStr);
+    const { error } = await sb.from('workout_set_logs').insert(
+      rows.map(r => ({
+        workout_id: workoutId,
+        client_id: currentUser.id,
+        exercise_name: exerciseName,
+        logged_date: todayStr,
+        ...r
+      }))
+    );
+    if (error) throw error;
+
+    await sb.from('workout_completions').upsert(
+      { workout_id: workoutId, client_id: currentUser.id, completed_date: todayStr },
+      { onConflict: 'workout_id,completed_date' }
+    );
+
+    const newMax = Math.max(...rows.filter(r => r.weight).map(r => r.weight), 0);
+    if (newMax > 0 && (priorMax === null || newMax > priorMax)) {
+      toast(`🎉 New PR on ${exerciseName}: ${newMax}kg!`, 'success');
+    } else {
+      toast('Sets saved.', 'success');
+    }
+
+    await renderClientDashboardStub();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not save sets.', 'error');
+    btn.disabled = false;
+    label.textContent = originalLabel;
+  }
+}
+
+function renderEmptyWorkouts() {
+  return `
+    <div class="text-center py-10 border border-dashed border-slate-300 rounded-2xl">
+      <p class="text-sm text-slate-400">No workouts assigned yet.</p>
+      <p class="text-xs text-slate-500 mt-1">Your coach will add your routine soon.</p>
+    </div>
+  `;
+}
+
+function renderLogForm() {
+  return `
+    <form id="log-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">Weight (kg)</label>
+          <input type="number" step="0.1" min="0" id="log-weight" placeholder="e.g. 72.5"
+            class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">Water (L)</label>
+          <input type="number" step="0.1" min="0" id="log-water" placeholder="e.g. 2.5"
+            class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+        </div>
+      </div>
+
+      <details class="group">
+        <summary class="text-xs font-medium text-emerald-700 cursor-pointer select-none list-none flex items-center gap-1">
+          <span class="group-open:rotate-90 transition-transform inline-block">▸</span> Add body measurements (optional)
+        </summary>
+        <div class="grid grid-cols-2 gap-3 mt-3">
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Waist (cm)</label>
+            <input type="number" step="0.1" min="0" id="log-waist" placeholder="e.g. 80"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Chest (cm)</label>
+            <input type="number" step="0.1" min="0" id="log-chest" placeholder="e.g. 100"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Hips (cm)</label>
+            <input type="number" step="0.1" min="0" id="log-hips" placeholder="e.g. 95"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Arms (cm)</label>
+            <input type="number" step="0.1" min="0" id="log-arms" placeholder="e.g. 35"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          </div>
+        </div>
+      </details>
+
+      <div>
+        <label class="text-xs text-slate-500 mb-1 block">PR / notes</label>
+        <textarea id="log-notes" rows="2" placeholder="Hit a new deadlift PR today..."
+          class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500 resize-none"></textarea>
+      </div>
+      <button type="submit" id="log-submit"
+        class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-2.5 text-sm transition flex items-center justify-center gap-2">
+        <span id="log-submit-label">Save today's log</span>
+      </button>
+    </form>
+  `;
+}
+
+async function handleLogSubmit(e) {
+  e.preventDefault();
+  const weightVal = document.getElementById('log-weight').value;
+  const waterVal = document.getElementById('log-water').value;
+  const waistVal = document.getElementById('log-waist').value;
+  const chestVal = document.getElementById('log-chest').value;
+  const hipsVal = document.getElementById('log-hips').value;
+  const armsVal = document.getElementById('log-arms').value;
+  const notesVal = document.getElementById('log-notes').value.trim();
+
+  if (!weightVal && !waterVal && !waistVal && !chestVal && !hipsVal && !armsVal && !notesVal) {
+    toast('Add at least one thing before saving.', 'info');
+    return;
+  }
+
+  const submitBtn = document.getElementById('log-submit');
+  const label = document.getElementById('log-submit-label');
+  submitBtn.disabled = true;
+  const originalLabel = label.textContent;
+  label.innerHTML = `<span class="spinner-light inline-block align-middle"></span>`;
+
+  try {
+    const { error } = await sb.from('progress_logs').insert({
+      client_id: currentUser.id,
+      weight: weightVal ? parseFloat(weightVal) : null,
+      water_liters: waterVal ? parseFloat(waterVal) : null,
+      waist_cm: waistVal ? parseFloat(waistVal) : null,
+      chest_cm: chestVal ? parseFloat(chestVal) : null,
+      hips_cm: hipsVal ? parseFloat(hipsVal) : null,
+      arms_cm: armsVal ? parseFloat(armsVal) : null,
+      pr_notes: notesVal || null
+    });
+    if (error) throw error;
+
+    toast('Logged. Nice work today.', 'success');
+    document.getElementById('log-form').reset();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not save your log.', 'error');
+  } finally {
+    submitBtn.disabled = false;
+    label.textContent = originalLabel;
+  }
+}
+
+/* ============================================================
+   COACH DASHBOARD (PHASE 3 + expanded features)
+============================================================ */
+let coachClients = [];      // cached client profiles
+let exerciseLibrary = [];   // cached reusable exercises
+let routineTemplates = [];  // cached templates with nested .items
+let coachView = 'roster';   // 'roster' | 'library' | 'templates' | 'clientDetail'
+let selectedClientId = null;
+let templateDraftItems = []; // exercises being added to a new template, in-memory
+let rosterSearch = '';
+let rosterStatusFilter = 'all'; // 'all' | 'paid' | 'pending'
+let rosterTagFilter = 'all';
+
+async function renderCoachDashboardStub() {
+  const outlet = document.getElementById('dashboard-outlet');
+  outlet.innerHTML = renderLoading();
+
+  const [clientsRes, libraryRes, templatesRes] = await Promise.all([
+    sb.from('profiles').select('*').eq('role', 'client').eq('coach_id', currentUser.id).order('last_active', { ascending: false }),
+    sb.from('exercise_library').select('*').order('created_at', { ascending: false }),
+    sb.from('routine_templates').select('*').order('created_at', { ascending: false })
+  ]);
+
+  if (clientsRes.error) {
+    console.error(clientsRes.error);
+    outlet.innerHTML = `
+      <div class="text-center text-sm text-red-600 py-10 px-4">
+        <p>Couldn't load your roster.</p>
+        <p class="text-xs text-slate-500 mt-2 break-words">${escapeHtml(clientsRes.error.message)}</p>
+      </div>`;
+    return;
+  }
+
+  coachClients = clientsRes.data || [];
+  exerciseLibrary = libraryRes.data || [];
+
+  routineTemplates = templatesRes.data || [];
+  if (routineTemplates.length) {
+    const { data: items } = await sb
+      .from('routine_template_items')
+      .select('*')
+      .in('template_id', routineTemplates.map(t => t.id))
+      .order('sort_order', { ascending: true });
+    routineTemplates.forEach(t => { t.items = (items || []).filter(i => i.template_id === t.id); });
+  }
+
+  outlet.innerHTML = `
+    <div class="animate-fade-in flex flex-col gap-6 pb-24">
+      ${renderCoachTabsBar()}
+      <div id="coach-view-outlet"></div>
+    </div>
+  `;
+  attachCoachTabHandlers();
+  renderActiveCoachView();
+}
+
+function renderCoachTabsBar() {
+  const tabs = [
+    { id: 'roster', label: 'Roster' },
+    { id: 'library', label: 'Library' },
+    { id: 'templates', label: 'Templates' }
+  ];
+  return `
+    <div class="flex bg-slate-100 rounded-xl p-1">
+      ${tabs.map(t => `
+        <button data-coach-tab="${t.id}"
+          class="flex-1 py-2 rounded-lg text-sm font-medium transition ${coachView === t.id || (coachView === 'clientDetail' && t.id === 'roster') ? 'bg-emerald-500 text-white' : 'text-slate-500'}">
+          ${t.label}
+        </button>
+      `).join('')}
+    </div>
+  `;
+}
+
+function attachCoachTabHandlers() {
+  document.querySelectorAll('[data-coach-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      coachView = btn.dataset.coachTab;
+      selectedClientId = null;
+      document.getElementById('dashboard-outlet').querySelector('.flex.bg-slate-100').outerHTML = renderCoachTabsBar();
+      attachCoachTabHandlers();
+      renderActiveCoachView();
+    });
+  });
+}
+
+function renderActiveCoachView() {
+  const viewOutlet = document.getElementById('coach-view-outlet');
+  if (coachView === 'roster') viewOutlet.innerHTML = renderRosterSection();
+  else if (coachView === 'library') viewOutlet.innerHTML = renderLibrarySection();
+  else if (coachView === 'templates') viewOutlet.innerHTML = renderTemplatesSection();
+  else if (coachView === 'clientDetail') { viewOutlet.innerHTML = renderLoading(); renderClientDetailSection(selectedClientId); return; }
+  attachActiveCoachViewHandlers();
+}
+
+/* ---------------- ROSTER ---------------- */
+function getFilteredClients() {
+  const q = rosterSearch.trim().toLowerCase();
+  return coachClients.filter(c => {
+    if (q && !(c.name || '').toLowerCase().includes(q) && !c.email.toLowerCase().includes(q)) return false;
+    if (rosterStatusFilter === 'paid' && !c.fee_paid) return false;
+    if (rosterStatusFilter === 'pending' && c.fee_paid) return false;
+    if (rosterTagFilter !== 'all' && !(c.tags || []).includes(rosterTagFilter)) return false;
+    return true;
+  });
+}
+
+function renderRosterStats() {
+  const total = coachClients.length;
+  const todayStr = toDateStr(new Date());
+  const activeToday = coachClients.filter(c => c.last_active && toDateStr(new Date(c.last_active)) === todayStr).length;
+  const pending = coachClients.filter(c => !c.fee_paid).length;
+  const stats = [
+    { label: 'Total clients', value: total },
+    { label: 'Active today', value: activeToday },
+    { label: 'Pending payment', value: pending }
+  ];
+  return `
+    <div class="grid grid-cols-3 gap-2 mb-4">
+      ${stats.map(s => `
+        <div class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-sm">
+          <p class="text-xl font-semibold text-slate-900">${s.value}</p>
+          <p class="text-[11px] text-slate-500 mt-0.5">${s.label}</p>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderRosterSection() {
+  const allTags = [...new Set(coachClients.flatMap(c => c.tags || []))].sort();
+  const pendingWithPhone = coachClients.filter(c => !c.fee_paid && c.phone);
+
+  return `
+    <section>
+      <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Client roster</h2>
+      <p class="text-sm text-slate-500 mb-4">${coachClients.length} registered client${coachClients.length === 1 ? '' : 's'}.</p>
+      ${renderRosterStats()}
+
+      <div class="flex flex-col gap-2 mb-4">
+        <input type="text" id="roster-search" value="${escapeAttr(rosterSearch)}" placeholder="Search by name or email..."
+          class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+        <div class="flex gap-2 flex-wrap">
+          <select id="roster-status-filter" class="text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-slate-600">
+            <option value="all" ${rosterStatusFilter === 'all' ? 'selected' : ''}>All statuses</option>
+            <option value="paid" ${rosterStatusFilter === 'paid' ? 'selected' : ''}>Paid</option>
+            <option value="pending" ${rosterStatusFilter === 'pending' ? 'selected' : ''}>Pending</option>
+          </select>
+          ${allTags.length ? `
+            <select id="roster-tag-filter" class="text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-slate-600">
+              <option value="all" ${rosterTagFilter === 'all' ? 'selected' : ''}>All tags</option>
+              ${allTags.map(t => `<option value="${escapeAttr(t)}" ${rosterTagFilter === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('')}
+            </select>
+          ` : ''}
+          ${pendingWithPhone.length ? `
+            <button id="bulk-whatsapp-btn" class="ml-auto text-xs font-medium text-emerald-700 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg px-3 py-2 transition">
+              Message ${pendingWithPhone.length} pending on WhatsApp
+            </button>
+          ` : ''}
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-3" id="roster-list-container">
+        ${renderRosterList()}
+      </div>
+    </section>
+
+    ${routineTemplates.length && coachClients.length ? `
+    <section class="mt-8">
+      <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Assign a template</h2>
+      <p class="text-sm text-slate-500 mb-4">Load a full routine onto one or more clients at once.</p>
+      <form id="assign-template-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
+        <div>
+          <label class="text-xs text-slate-500 mb-2 block">Client(s)</label>
+          <div class="flex flex-col gap-1.5 max-h-40 overflow-y-auto border border-slate-200 rounded-lg p-2">
+            ${coachClients.map(c => `
+              <label class="flex items-center gap-2 text-sm text-slate-700 px-1 py-1">
+                <input type="checkbox" data-assign-template-client="${escapeAttr(c.id)}" class="accent-emerald-500 w-4 h-4" />
+                ${escapeHtml(c.name || c.email)}
+              </label>
+            `).join('')}
+          </div>
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">Template</label>
+          <select id="assign-template-template" required class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500">
+            ${routineTemplates.map(t => `<option value="${escapeAttr(t.id)}">${escapeHtml(t.name)} (${t.items.length} exercise${t.items.length === 1 ? '' : 's'})</option>`).join('')}
+          </select>
+        </div>
+        <button type="submit" id="assign-template-submit" class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-2.5 text-sm transition flex items-center justify-center gap-2">
+          <span id="assign-template-submit-label">Assign template</span>
+        </button>
+      </form>
+    </section>
+    ` : ''}
+
+    <section class="mt-8">
+      <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Assign a single exercise</h2>
+      <p class="text-sm text-slate-500 mb-4">Pick a client and add one exercise to their plan.</p>
+      ${coachClients.length ? renderWorkoutBuilder() : `
+        <div class="text-center py-10 border border-dashed border-slate-300 rounded-2xl text-sm text-slate-500">
+          No clients yet — once someone signs up as a client, they'll show up here.
+        </div>
+      `}
+    </section>
+  `;
+}
+
+function renderRosterList() {
+  const filtered = getFilteredClients();
+  if (!coachClients.length) return renderEmptyRoster();
+  if (!filtered.length) return `<div class="text-center py-8 border border-dashed border-slate-300 rounded-2xl text-sm text-slate-400">No clients match your filters.</div>`;
+  return filtered.map(renderClientCard).join('');
+}
+
+function attachRosterCardHandlers() {
+  document.querySelectorAll('[data-toggle-paid]').forEach(btn => {
+    btn.addEventListener('click', () => handleTogglePaid(btn.dataset.togglePaid, btn.dataset.currentPaid === 'true'));
+  });
+  document.querySelectorAll('[data-manage-client]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      selectedClientId = btn.dataset.manageClient;
+      coachView = 'clientDetail';
+      renderActiveCoachView();
+    });
+  });
+}
+
+async function handleBulkWhatsapp() {
+  const pendingWithPhone = coachClients.filter(c => !c.fee_paid && c.phone);
+  if (!pendingWithPhone.length) return;
+  toast(`Opening WhatsApp for ${pendingWithPhone.length} client${pendingWithPhone.length === 1 ? '' : 's'}. Allow popups if prompted.`, 'info');
+  pendingWithPhone.forEach((c, i) => {
+    setTimeout(() => {
+      const msg = encodeURIComponent(`Hi ${c.name || 'there'}, just checking in — your payment is still pending. Let me know if you have any questions!`);
+      window.open(`https://wa.me/${c.phone.replace(/[^0-9]/g, '')}?text=${msg}`, '_blank');
+    }, i * 400);
+  });
+}
+
+function attachActiveCoachViewHandlers() {
+  if (coachView === 'roster') {
+    const refreshRosterList = () => { document.getElementById('roster-list-container').innerHTML = renderRosterList(); attachRosterCardHandlers(); };
+    const searchInput = document.getElementById('roster-search');
+    if (searchInput) searchInput.addEventListener('input', (e) => { rosterSearch = e.target.value; refreshRosterList(); });
+    const statusFilter = document.getElementById('roster-status-filter');
+    if (statusFilter) statusFilter.addEventListener('change', (e) => { rosterStatusFilter = e.target.value; refreshRosterList(); });
+    const tagFilter = document.getElementById('roster-tag-filter');
+    if (tagFilter) tagFilter.addEventListener('change', (e) => { rosterTagFilter = e.target.value; refreshRosterList(); });
+    const bulkWaBtn = document.getElementById('bulk-whatsapp-btn');
+    if (bulkWaBtn) bulkWaBtn.addEventListener('click', handleBulkWhatsapp);
+
+    const builderForm = document.getElementById('builder-form');
+    if (builderForm) builderForm.addEventListener('submit', handleAssignWorkout);
+    const librarySelect = document.getElementById('builder-library-select');
+    if (librarySelect) librarySelect.addEventListener('change', handleLibraryAutofill);
+    const assignTemplateForm = document.getElementById('assign-template-form');
+    if (assignTemplateForm) assignTemplateForm.addEventListener('submit', handleAssignTemplate);
+    attachRosterCardHandlers();
+  } else if (coachView === 'library') {
+    const libForm = document.getElementById('library-form');
+    if (libForm) libForm.addEventListener('submit', handleAddLibraryExercise);
+    document.querySelectorAll('[data-delete-library]').forEach(btn => {
+      btn.addEventListener('click', () => handleDeleteLibraryExercise(btn.dataset.deleteLibrary));
+    });
+  } else if (coachView === 'templates') {
+    const addRowForm = document.getElementById('template-add-row-form');
+    if (addRowForm) addRowForm.addEventListener('submit', handleAddDraftItem);
+    const saveTemplateForm = document.getElementById('save-template-form');
+    if (saveTemplateForm) saveTemplateForm.addEventListener('submit', handleSaveTemplate);
+    document.querySelectorAll('[data-remove-draft-item]').forEach(btn => {
+      btn.addEventListener('click', () => { templateDraftItems.splice(parseInt(btn.dataset.removeDraftItem, 10), 1); renderActiveCoachView(); });
+    });
+    document.querySelectorAll('[data-delete-template]').forEach(btn => {
+      btn.addEventListener('click', () => handleDeleteTemplate(btn.dataset.deleteTemplate));
+    });
+  }
+}
+
+function renderClientCard(c) {
+  const paidBadge = c.fee_paid
+    ? `<span class="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Paid</span>`
+    : `<span class="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Pending</span>`;
+
+  const lastActive = c.last_active ? timeAgo(c.last_active) : 'Never';
+  const displayName = c.name || c.email;
+
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-center justify-between gap-3">
+      <button data-manage-client="${c.id}" class="min-w-0 text-left flex-1">
+        <div class="flex items-center gap-2 flex-wrap">
+          <h3 class="font-medium text-slate-900 text-sm truncate">${escapeHtml(displayName)}</h3>
+          ${paidBadge}
+        </div>
+        <p class="text-xs text-slate-500 mt-1">Active ${lastActive}</p>
+        ${c.tags && c.tags.length ? `
+          <div class="flex flex-wrap gap-1 mt-1.5">
+            ${c.tags.map(t => `<span class="text-[10px] font-medium bg-slate-100 text-slate-600 rounded-full px-2 py-0.5">${escapeHtml(t)}</span>`).join('')}
+          </div>
+        ` : ''}
+      </button>
+      <div class="flex items-center gap-2 shrink-0">
+        <button data-toggle-paid="${c.id}" data-current-paid="${c.fee_paid}"
+          class="text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:border-emerald-400 hover:text-emerald-600 transition">
+          Mark ${c.fee_paid ? 'unpaid' : 'paid'}
+        </button>
+        ${c.phone ? `
+          <a href="https://wa.me/${escapeAttr(c.phone.replace(/[^0-9]/g, ''))}" target="_blank" rel="noopener noreferrer"
+            class="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500 text-white border border-emerald-500 hover:bg-emerald-600 transition">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0012.04 2zm0 18.15h-.01a8.2 8.2 0 01-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.2 8.2 0 01-1.26-4.38c0-4.54 3.7-8.24 8.25-8.24 2.2 0 4.27.86 5.83 2.42a8.18 8.18 0 012.41 5.83c0 4.55-3.7 8.23-8.24 8.23zm4.52-6.16c-.25-.12-1.47-.72-1.69-.81-.23-.08-.4-.12-.56.13-.17.25-.64.81-.79.97-.14.17-.29.19-.54.06-.25-.12-1.05-.39-2-1.23-.74-.66-1.24-1.47-1.39-1.72-.14-.25-.02-.38.11-.51.11-.11.25-.29.37-.43.12-.14.16-.25.25-.41.08-.17.04-.31-.02-.43-.06-.12-.56-1.35-.77-1.85-.2-.48-.41-.42-.56-.43-.14-.01-.31-.01-.48-.01-.17 0-.43.06-.66.31-.23.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.17 1.75 2.67 4.24 3.74.59.26 1.06.41 1.42.52.6.19 1.14.16 1.57.1.48-.07 1.47-.6 1.68-1.18.21-.58.21-1.07.14-1.18-.06-.1-.23-.16-.48-.28z"/></svg>
+          </a>
+        ` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function renderEmptyRoster() {
+  return `
+    <div class="text-center py-10 border border-dashed border-slate-300 rounded-2xl">
+      <p class="text-sm text-slate-400">No clients yet.</p>
+      <p class="text-xs text-slate-500 mt-1">They'll appear here once they sign up.</p>
+    </div>
+  `;
+}
+
+function renderWorkoutBuilder() {
+  const clientOptions = coachClients.map(c => `<option value="${escapeAttr(c.id)}">${escapeHtml(c.name || c.email)}</option>`).join('');
+  const libraryOptions = exerciseLibrary.map(ex => `<option value="${escapeAttr(ex.id)}">${escapeHtml(ex.name)}</option>`).join('');
+
+  return `
+    <form id="builder-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
+      <div>
+        <label class="text-xs text-slate-500 mb-1 block">Client</label>
+        <select id="builder-client" required
+          class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500">
+          ${clientOptions}
+        </select>
+      </div>
+      ${exerciseLibrary.length ? `
+      <div>
+        <label class="text-xs text-slate-500 mb-1 block">Fill from library (optional)</label>
+        <select id="builder-library-select"
+          class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500">
+          <option value="">— Type manually —</option>
+          ${libraryOptions}
+        </select>
+      </div>
+      ` : ''}
+      <div>
+        <label class="text-xs text-slate-500 mb-1 block">Exercise name</label>
+        <input required type="text" id="builder-exercise" placeholder="e.g. Barbell Squat"
+          class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+      </div>
+      <div class="grid grid-cols-3 gap-3">
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">Sets</label>
+          <input required type="number" min="1" id="builder-sets" placeholder="4"
+            class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">Reps</label>
+          <input required type="text" id="builder-reps" placeholder="8-10"
+            class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">Weight</label>
+          <input type="text" id="builder-weight" placeholder="60kg"
+            class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-slate-500 mb-1 block">YouTube tutorial URL</label>
+        <input type="url" id="builder-video" placeholder="https://youtube.com/watch?v=..."
+          class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+      </div>
+
+      <details class="group">
+        <summary class="text-xs font-medium text-emerald-700 cursor-pointer select-none list-none flex items-center gap-1">
+          <span class="group-open:rotate-90 transition-transform inline-block">▸</span> Day naming & scheduling (optional)
+        </summary>
+        <div class="flex flex-col gap-3 mt-3">
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Day label</label>
+            <input type="text" id="builder-day-label" placeholder="e.g. Push Day, Leg Day"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 mb-2 block">Scheduled days (blank = shows every day)</label>
+            <div class="flex gap-1.5 flex-wrap">
+              ${WEEKDAY_LABELS.map((lbl, i) => `
+                <label class="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border cursor-pointer transition border-slate-300 text-slate-600 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 has-[:checked]:text-emerald-700">
+                  <input type="checkbox" class="hidden" data-builder-day="${i}" />
+                  ${lbl}
+                </label>
+              `).join('')}
+            </div>
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Form instructions</label>
+            <textarea id="builder-instructions" rows="2" placeholder="e.g. Keep chest up, control the descent..."
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500 resize-none"></textarea>
+          </div>
+        </div>
+      </details>
+
+      <button type="submit" id="builder-submit"
+        class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-2.5 text-sm transition flex items-center justify-center gap-2">
+        <span id="builder-submit-label">Assign workout</span>
+      </button>
+    </form>
+  `;
+}
+
+function handleLibraryAutofill(e) {
+  const ex = exerciseLibrary.find(x => x.id === e.target.value);
+  if (!ex) return;
+  document.getElementById('builder-exercise').value = ex.name || '';
+  if (ex.default_sets) document.getElementById('builder-sets').value = ex.default_sets;
+  document.getElementById('builder-reps').value = ex.default_reps || '';
+  document.getElementById('builder-weight').value = ex.default_weight || '';
+  document.getElementById('builder-video').value = ex.video_url || '';
+  document.getElementById('builder-instructions').value = ex.default_instructions || '';
+}
+
+async function handleAssignWorkout(e) {
+  e.preventDefault();
+  const clientId = document.getElementById('builder-client').value;
+  const exerciseName = document.getElementById('builder-exercise').value.trim();
+  const sets = document.getElementById('builder-sets').value;
+  const reps = document.getElementById('builder-reps').value.trim();
+  const weight = document.getElementById('builder-weight').value.trim();
+  const videoUrl = document.getElementById('builder-video').value.trim();
+  const dayLabel = document.getElementById('builder-day-label').value.trim();
+  const instructions = document.getElementById('builder-instructions').value.trim();
+  const daysOfWeek = [...document.querySelectorAll('[data-builder-day]:checked')].map(cb => parseInt(cb.dataset.builderDay, 10));
+
+  const submitBtn = document.getElementById('builder-submit');
+  const label = document.getElementById('builder-submit-label');
+  submitBtn.disabled = true;
+  const originalLabel = label.textContent;
+  label.innerHTML = `<span class="spinner-light inline-block align-middle"></span>`;
+
+  try {
+    const { error } = await sb.from('workouts').insert({
+      client_id: clientId,
+      exercise_name: exerciseName,
+      sets: parseInt(sets, 10),
+      target_reps: reps,
+      target_weight: weight || null,
+      video_url: videoUrl || null,
+      day_label: dayLabel || null,
+      days_of_week: daysOfWeek,
+      instructions: instructions || null
+    });
+    if (error) throw error;
+
+    toast('Workout assigned.', 'success');
+    document.getElementById('builder-form').reset();
+    document.querySelectorAll('[data-builder-day]').forEach(cb => { cb.checked = false; });
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not assign workout.', 'error');
+  } finally {
+    submitBtn.disabled = false;
+    label.textContent = originalLabel;
+  }
+}
+
+async function handleAssignTemplate(e) {
+  e.preventDefault();
+  const clientIds = [...document.querySelectorAll('[data-assign-template-client]:checked')].map(cb => cb.dataset.assignTemplateClient);
+  const templateId = document.getElementById('assign-template-template').value;
+  const template = routineTemplates.find(t => t.id === templateId);
+  if (!clientIds.length) { toast('Select at least one client.', 'info'); return; }
+  if (!template || !template.items.length) { toast('That template has no exercises.', 'info'); return; }
+
+  const submitBtn = document.getElementById('assign-template-submit');
+  const label = document.getElementById('assign-template-submit-label');
+  submitBtn.disabled = true;
+  const originalLabel = label.textContent;
+  label.innerHTML = `<span class="spinner-light inline-block align-middle"></span>`;
+
+  try {
+    const rows = clientIds.flatMap(clientId => template.items.map(item => ({
+      client_id: clientId,
+      exercise_name: item.exercise_name,
+      sets: item.sets,
+      target_reps: item.target_reps,
+      target_weight: item.target_weight,
+      video_url: item.video_url,
+      day_label: item.day_label || null,
+      days_of_week: item.days_of_week || [],
+      instructions: item.instructions || null
+    })));
+    const { error } = await sb.from('workouts').insert(rows);
+    if (error) throw error;
+    toast(`"${template.name}" assigned to ${clientIds.length} client${clientIds.length === 1 ? '' : 's'}.`, 'success');
+    document.querySelectorAll('[data-assign-template-client]').forEach(cb => { cb.checked = false; });
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not assign template.', 'error');
+  } finally {
+    submitBtn.disabled = false;
+    label.textContent = originalLabel;
+  }
+}
+
+async function handleTogglePaid(clientId, currentPaid) {
+  try {
+    const { error } = await sb.from('profiles').update({ fee_paid: !currentPaid }).eq('id', clientId);
+    if (error) throw error;
+    toast(!currentPaid ? 'Marked as paid.' : 'Marked as unpaid.', 'success');
+    await renderCoachDashboardStub();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not update payment status.', 'error');
+  }
+}
+
+/* ---------------- EXERCISE LIBRARY ---------------- */
+function renderLibrarySection() {
+  return `
+    <section>
+      <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Exercise library</h2>
+      <p class="text-sm text-slate-500 mb-4">Save exercises once, reuse them for any client.</p>
+      <div class="flex flex-col gap-3 mb-6">
+        ${exerciseLibrary.length ? exerciseLibrary.map(renderLibraryCard).join('') : `
+          <div class="text-center py-10 border border-dashed border-slate-300 rounded-2xl">
+            <p class="text-sm text-slate-400">Your library is empty.</p>
+            <p class="text-xs text-slate-500 mt-1">Add an exercise below to get started.</p>
+          </div>
+        `}
+      </div>
+
+      <form id="library-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">Exercise name</label>
+          <input required type="text" id="lib-name" placeholder="e.g. Romanian Deadlift"
+            class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Sets</label>
+            <input type="number" min="1" id="lib-sets" placeholder="4"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Reps</label>
+            <input type="text" id="lib-reps" placeholder="8-10"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Weight</label>
+            <input type="text" id="lib-weight" placeholder="60kg"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          </div>
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">YouTube tutorial URL</label>
+          <input type="url" id="lib-video" placeholder="https://youtube.com/watch?v=..."
+            class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">Form instructions (optional)</label>
+          <textarea id="lib-instructions" rows="2" placeholder="e.g. Keep chest up, control the descent..."
+            class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500 resize-none"></textarea>
+        </div>
+        <button type="submit" id="library-submit" class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-2.5 text-sm transition flex items-center justify-center gap-2">
+          <span id="library-submit-label">Add to library</span>
+        </button>
+      </form>
+    </section>
+  `;
+}
+
+function renderLibraryCard(ex) {
+  const meta = [ex.default_sets ? `${ex.default_sets} sets` : null, ex.default_reps || null, ex.default_weight || null].filter(Boolean).join(' · ');
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-center justify-between gap-3">
+      <div class="min-w-0">
+        <h3 class="font-medium text-slate-900 text-sm truncate">${escapeHtml(ex.name)}</h3>
+        ${meta ? `<p class="text-xs text-slate-500 mt-1">${escapeHtml(meta)}</p>` : ''}
+        ${ex.default_instructions ? `<p class="text-xs text-slate-400 mt-1 italic">${escapeHtml(ex.default_instructions)}</p>` : ''}
+      </div>
+      <button data-delete-library="${ex.id}" class="shrink-0 text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:border-red-300 hover:text-red-600 transition">Remove</button>
+    </div>
+  `;
+}
+
+async function handleAddLibraryExercise(e) {
+  e.preventDefault();
+  const submitBtn = document.getElementById('library-submit');
+  const label = document.getElementById('library-submit-label');
+  submitBtn.disabled = true;
+  const originalLabel = label.textContent;
+  label.innerHTML = `<span class="spinner-light inline-block align-middle"></span>`;
+
+  try {
+    const { error } = await sb.from('exercise_library').insert({
+      coach_id: currentUser.id,
+      name: document.getElementById('lib-name').value.trim(),
+      default_sets: document.getElementById('lib-sets').value ? parseInt(document.getElementById('lib-sets').value, 10) : null,
+      default_reps: document.getElementById('lib-reps').value.trim() || null,
+      default_weight: document.getElementById('lib-weight').value.trim() || null,
+      video_url: document.getElementById('lib-video').value.trim() || null,
+      default_instructions: document.getElementById('lib-instructions').value.trim() || null
+    });
+    if (error) throw error;
+    toast('Added to library.', 'success');
+    await renderCoachDashboardStub();
+    coachView = 'library';
+    renderActiveCoachView();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not add exercise.', 'error');
+    submitBtn.disabled = false;
+    label.textContent = originalLabel;
+  }
+}
+
+async function handleDeleteLibraryExercise(id) {
+  try {
+    const { error } = await sb.from('exercise_library').delete().eq('id', id);
+    if (error) throw error;
+    toast('Removed from library.', 'success');
+    exerciseLibrary = exerciseLibrary.filter(ex => ex.id !== id);
+    renderActiveCoachView();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not remove exercise.', 'error');
+  }
+}
+
+/* ---------------- ROUTINE TEMPLATES ---------------- */
+function renderTemplatesSection() {
+  return `
+    <section>
+      <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Routine templates</h2>
+      <p class="text-sm text-slate-500 mb-4">Bundle exercises once, assign the whole thing in a tap.</p>
+      <div class="flex flex-col gap-3 mb-6">
+        ${routineTemplates.length ? routineTemplates.map(renderTemplateCard).join('') : `
+          <div class="text-center py-10 border border-dashed border-slate-300 rounded-2xl">
+            <p class="text-sm text-slate-400">No templates yet.</p>
+            <p class="text-xs text-slate-500 mt-1">Build one below.</p>
+          </div>
+        `}
+      </div>
+
+      <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
+        <h3 class="font-medium text-slate-900 text-sm">New template</h3>
+
+        ${templateDraftItems.length ? `
+          <div class="flex flex-col gap-2" id="template-items-preview">
+            ${templateDraftItems.map((item, i) => `
+              <div class="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                <p class="text-xs text-slate-700 truncate">${escapeHtml(item.exercise_name)} — ${item.sets}x${escapeHtml(item.target_reps)}${item.target_weight ? ` @ ${escapeHtml(item.target_weight)}` : ''}</p>
+                <button data-remove-draft-item="${i}" class="shrink-0 text-xs text-red-600">Remove</button>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+
+        <form id="template-add-row-form" class="flex flex-col gap-3 border-t border-slate-100 pt-4">
+          <input required type="text" id="draft-exercise" placeholder="Exercise name"
+            class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          <div class="grid grid-cols-3 gap-3">
+            <input required type="number" min="1" id="draft-sets" placeholder="Sets"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+            <input required type="text" id="draft-reps" placeholder="Reps"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+            <input type="text" id="draft-weight" placeholder="Weight"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          </div>
+          <input type="url" id="draft-video" placeholder="YouTube tutorial URL (optional)"
+            class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          <details class="group">
+            <summary class="text-xs font-medium text-emerald-700 cursor-pointer select-none list-none flex items-center gap-1">
+              <span class="group-open:rotate-90 transition-transform inline-block">▸</span> Day naming & scheduling (optional)
+            </summary>
+            <div class="flex flex-col gap-3 mt-3">
+              <input type="text" id="draft-day-label" placeholder="e.g. Push Day, Leg Day"
+                class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+              <div class="flex gap-1.5 flex-wrap">
+                ${WEEKDAY_LABELS.map((lbl, i) => `
+                  <label class="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border cursor-pointer transition border-slate-300 text-slate-600 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50 has-[:checked]:text-emerald-700">
+                    <input type="checkbox" class="hidden" data-draft-day="${i}" />
+                    ${lbl}
+                  </label>
+                `).join('')}
+              </div>
+              <textarea id="draft-instructions" rows="2" placeholder="Form instructions (optional)"
+                class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500 resize-none"></textarea>
+            </div>
+          </details>
+          <button type="submit" class="text-sm font-medium text-emerald-700 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg py-2 transition">+ Add exercise to template</button>
+        </form>
+
+        <form id="save-template-form" class="flex flex-col gap-3 border-t border-slate-100 pt-4">
+          <input required type="text" id="template-name" placeholder="Template name, e.g. Leg Day A"
+            class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          <button type="submit" id="save-template-submit" class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-2.5 text-sm transition flex items-center justify-center gap-2">
+            <span id="save-template-submit-label">Save template${templateDraftItems.length ? ` (${templateDraftItems.length} exercise${templateDraftItems.length === 1 ? '' : 's'})` : ''}</span>
+          </button>
+        </form>
+      </div>
+    </section>
+  `;
+}
+
+function renderTemplateCard(t) {
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+      <div class="flex items-center justify-between gap-3 mb-2">
+        <h3 class="font-medium text-slate-900 text-sm truncate">${escapeHtml(t.name)}</h3>
+        <button data-delete-template="${t.id}" class="shrink-0 text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:border-red-300 hover:text-red-600 transition">Delete</button>
+      </div>
+      <p class="text-xs text-slate-500">${t.items.map(i => escapeHtml(i.exercise_name)).join(', ') || 'No exercises'}</p>
+    </div>
+  `;
+}
+
+function handleAddDraftItem(e) {
+  e.preventDefault();
+  templateDraftItems.push({
+    exercise_name: document.getElementById('draft-exercise').value.trim(),
+    sets: parseInt(document.getElementById('draft-sets').value, 10),
+    target_reps: document.getElementById('draft-reps').value.trim(),
+    target_weight: document.getElementById('draft-weight').value.trim() || null,
+    video_url: document.getElementById('draft-video').value.trim() || null,
+    day_label: document.getElementById('draft-day-label').value.trim() || null,
+    days_of_week: [...document.querySelectorAll('[data-draft-day]:checked')].map(cb => parseInt(cb.dataset.draftDay, 10)),
+    instructions: document.getElementById('draft-instructions').value.trim() || null
+  });
+  renderActiveCoachView();
+}
+
+async function handleSaveTemplate(e) {
+  e.preventDefault();
+  const name = document.getElementById('template-name').value.trim();
+  if (!templateDraftItems.length) { toast('Add at least one exercise first.', 'info'); return; }
+
+  const submitBtn = document.getElementById('save-template-submit');
+  const label = document.getElementById('save-template-submit-label');
+  submitBtn.disabled = true;
+  const originalLabel = label.textContent;
+  label.innerHTML = `<span class="spinner-light inline-block align-middle"></span>`;
+
+  try {
+    const { data: template, error } = await sb.from('routine_templates').insert({ coach_id: currentUser.id, name }).select().single();
+    if (error) throw error;
+
+    const itemRows = templateDraftItems.map((item, i) => ({ ...item, template_id: template.id, sort_order: i }));
+    const { error: itemsError } = await sb.from('routine_template_items').insert(itemRows);
+    if (itemsError) throw itemsError;
+
+    toast('Template saved.', 'success');
+    templateDraftItems = [];
+    await renderCoachDashboardStub();
+    coachView = 'templates';
+    renderActiveCoachView();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not save template.', 'error');
+    submitBtn.disabled = false;
+    label.textContent = originalLabel;
+  }
+}
+
+async function handleDeleteTemplate(id) {
+  try {
+    const { error } = await sb.from('routine_templates').delete().eq('id', id);
+    if (error) throw error;
+    toast('Template deleted.', 'success');
+    routineTemplates = routineTemplates.filter(t => t.id !== id);
+    renderActiveCoachView();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not delete template.', 'error');
+  }
+}
+
+/* ---------------- CLIENT DETAIL (edit / remove / history / feedback) ---------------- */
+async function renderClientDetailSection(clientId) {
+  const viewOutlet = document.getElementById('coach-view-outlet');
+  const client = coachClients.find(c => c.id === clientId);
+  if (!client) { coachView = 'roster'; renderActiveCoachView(); return; }
+
+  const [workoutsRes, logsRes, completionsRes, photosRes, setLogsRes] = await Promise.all([
+    sb.from('workouts').select('*').eq('client_id', clientId).order('created_at', { ascending: false }),
+    sb.from('progress_logs').select('*').eq('client_id', clientId).order('logged_at', { ascending: false }).limit(20),
+    sb.from('workout_completions').select('*').eq('client_id', clientId).order('completed_date', { ascending: false }).limit(120),
+    sb.from('progress_photos').select('*').eq('client_id', clientId).order('taken_at', { ascending: false }).limit(9),
+    sb.from('workout_set_logs').select('*').eq('client_id', clientId).order('logged_date', { ascending: false }).limit(500)
+  ]);
+
+  const workouts = workoutsRes.data || [];
+  const logs = logsRes.data || [];
+  const completions = completionsRes.data || [];
+  const photos = photosRes.data || [];
+  const clientSetLogs = setLogsRes.data || [];
+  const loggedExercises = [...new Set(clientSetLogs.filter(s => s.weight).map(s => s.exercise_name))].sort();
+  const otherClients = coachClients.filter(c => c.id !== clientId);
+
+  const streakDates = [...new Set([
+    ...logs.map(l => toDateStr(new Date(l.logged_at))),
+    ...completions.map(c => c.completed_date)
+  ])];
+  const restDays = client.rest_days || [];
+  const streak = computeStreak(streakDates, restDays);
+  const adherence = computeAdherence(streakDates, restDays, 7);
+  const badges = computeBadges({
+    logsCount: logs.length,
+    streak,
+    hasPR: logs.some(l => l.pr_notes),
+    completionsCount: completions.length,
+    hasMeasurement: logs.some(l => l.waist_cm || l.chest_cm || l.hips_cm || l.arms_cm),
+    hasPhoto: photos.length > 0
+  });
+
+  viewOutlet.innerHTML = `
+    <button id="back-to-roster" class="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 mb-4">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+      All clients
+    </button>
+
+    <div class="flex items-center justify-between gap-2 mb-1">
+      <h1 class="font-display text-xl font-semibold text-slate-900 truncate">${escapeHtml(client.name || client.email)}</h1>
+      <div class="shrink-0 flex items-center gap-2">
+        ${streak > 0 ? `<span class="flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-1">🔥 ${streak}</span>` : ''}
+      </div>
+    </div>
+    <p class="text-sm text-slate-500 mb-4">${adherence.completed}/${adherence.expected} training days hit this week · ${badges.filter(b => b.earned).length}/${badges.length} badges earned</p>
+
+    <section class="mb-8">
+      <h2 class="font-display text-lg font-semibold text-slate-900 mb-4">Edit client</h2>
+      <form id="edit-client-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">Name</label>
+          <input type="text" id="edit-name" value="${escapeAttr(client.name || '')}" placeholder="${escapeAttr(client.email)}"
+            class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">Phone (for WhatsApp)</label>
+          <input type="tel" id="edit-phone" value="${escapeAttr(client.phone || '')}" placeholder="+1 555 123 4567"
+            class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">Tags (comma separated)</label>
+          <input type="text" id="edit-tags" value="${escapeAttr((client.tags || []).join(', '))}" placeholder="e.g. Beginner, Weight loss"
+            class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 mb-2 block">Rest days (streak-safe, excluded from adherence)</label>
+          <div class="flex gap-1.5 flex-wrap">
+            ${WEEKDAY_LABELS.map((lbl, i) => `
+              <label class="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border cursor-pointer transition ${restDays.includes(i) ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-300 text-slate-600'}">
+                <input type="checkbox" class="hidden" data-rest-day="${i}" ${restDays.includes(i) ? 'checked' : ''} />
+                ${lbl}
+              </label>
+            `).join('')}
+          </div>
+        </div>
+        <label class="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" id="edit-fee-paid" ${client.fee_paid ? 'checked' : ''} class="accent-emerald-500 w-4 h-4" />
+          Fee paid
+        </label>
+        <button type="submit" id="edit-client-submit" class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-2.5 text-sm transition flex items-center justify-center gap-2">
+          <span id="edit-client-submit-label">Save changes</span>
+        </button>
+      </form>
+
+      ${client.goals || client.injuries || client.experience_level ? `
+        <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4 mt-3">
+          <p class="text-xs font-medium text-slate-700 mb-2">From their signup questionnaire</p>
+          ${client.experience_level ? `<p class="text-xs text-slate-500 mb-1"><span class="text-slate-600 font-medium">Experience:</span> ${escapeHtml(client.experience_level)}</p>` : ''}
+          ${client.goals ? `<p class="text-xs text-slate-500 mb-1"><span class="text-slate-600 font-medium">Goals:</span> ${escapeHtml(client.goals)}</p>` : ''}
+          ${client.injuries ? `<p class="text-xs text-slate-500"><span class="text-slate-600 font-medium">Injuries/limitations:</span> ${escapeHtml(client.injuries)}</p>` : ''}
+        </div>
+      ` : ''}
+
+      <details class="mt-3">
+        <summary class="text-xs text-red-600 cursor-pointer">Remove this client</summary>
+        <div class="bg-white border border-red-200 rounded-2xl p-4 shadow-sm mt-2 flex flex-col gap-3">
+          <p class="text-xs text-slate-500">This deletes their profile and logs. It does not delete their login — they'll just need a new profile created to sign back in.</p>
+          ${workouts.length ? `
+            <div>
+              <label class="text-xs text-slate-500 mb-1 block">Their ${workouts.length} assigned workout${workouts.length === 1 ? '' : 's'}:</label>
+              <select id="reassign-select" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/60">
+                <option value="">Delete their workouts too</option>
+                ${otherClients.map(c => `<option value="${escapeAttr(c.id)}">Reassign to ${escapeHtml(c.name || c.email)}</option>`).join('')}
+              </select>
+            </div>
+          ` : ''}
+          <button id="delete-client-btn" class="bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg py-2.5 text-sm transition">Confirm remove client</button>
+        </div>
+      </details>
+    </section>
+
+    <section class="mb-8">
+      ${renderBadgesSection(badges)}
+    </section>
+
+    <section class="mb-8">
+      <div class="flex items-center justify-between gap-2 mb-4">
+        <h2 class="font-display text-lg font-semibold text-slate-900">Assigned workouts</h2>
+        <button id="export-history-btn" class="text-xs font-medium text-slate-600 border border-slate-300 hover:border-slate-400 rounded-lg px-2.5 py-1.5 transition">Export CSV</button>
+      </div>
+      <div class="flex flex-col gap-3">
+        ${workouts.length ? workouts.map(w => renderCoachWorkoutRow(w, otherClients)).join('') : `
+          <div class="text-center py-8 border border-dashed border-slate-300 rounded-2xl text-sm text-slate-400">No workouts assigned yet.</div>
+        `}
+      </div>
+      ${workouts.length && otherClients.length ? `
+        <div class="flex items-center gap-2 mt-3">
+          <select id="duplicate-plan-target" class="flex-1 text-xs bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-2 text-slate-600">
+            <option value="">Duplicate this plan to…</option>
+            ${otherClients.map(c => `<option value="${escapeAttr(c.id)}">${escapeHtml(c.name || c.email)}</option>`).join('')}
+          </select>
+          <button id="duplicate-plan-btn" class="shrink-0 text-xs font-medium text-emerald-700 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg px-3 py-2 transition">Duplicate</button>
+        </div>
+      ` : ''}
+    </section>
+
+    ${loggedExercises.length ? `
+    <section class="mb-8">
+      <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Their lifts</h2>
+      <p class="text-sm text-slate-500 mb-4">Actual weight logged per set, so you can gauge progression.</p>
+      ${renderLiftProgressionPicker(loggedExercises, clientSetLogs)}
+    </section>
+    ` : ''}
+
+    ${photos.length ? `
+    <section class="mb-8">
+      <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Progress photos</h2>
+      <p class="text-sm text-slate-500 mb-4">Most recent ${photos.length}.</p>
+      <div class="grid grid-cols-3 gap-2">
+        ${photos.map(renderPhotoThumb).join('')}
+      </div>
+    </section>
+    ` : ''}
+
+    <section>
+      <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Progress history</h2>
+      <p class="text-sm text-slate-500 mb-4">Last ${logs.length} log${logs.length === 1 ? '' : 's'}.</p>
+      ${logs.length ? renderWeightSparkline(logs) : ''}
+      <div class="flex flex-col gap-3 mt-3">
+        ${logs.length ? logs.map(renderCoachLogRow).join('') : `
+          <div class="text-center py-8 border border-dashed border-slate-300 rounded-2xl text-sm text-slate-400">No logs yet.</div>
+        `}
+      </div>
+    </section>
+  `;
+
+  document.getElementById('back-to-roster').addEventListener('click', () => { coachView = 'roster'; selectedClientId = null; renderActiveCoachView(); });
+  document.getElementById('edit-client-form').addEventListener('submit', (e) => handleEditClient(e, clientId));
+  document.getElementById('export-history-btn').addEventListener('click', () => exportClientHistoryCSV(client, logs, clientSetLogs));
+  const duplicateBtn = document.getElementById('duplicate-plan-btn');
+  if (duplicateBtn) duplicateBtn.addEventListener('click', () => handleDuplicatePlan(workouts, document.getElementById('duplicate-plan-target').value));
+  const coachLiftPicker = document.getElementById('lift-picker');
+  if (coachLiftPicker) coachLiftPicker.addEventListener('change', () => renderLiftChart(coachLiftPicker.value, clientSetLogs));
+  if (loggedExercises.length) renderLiftChart(loggedExercises[0], clientSetLogs);
+  document.querySelectorAll('[data-rest-day]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const label = cb.closest('label');
+      label.classList.toggle('border-emerald-500', cb.checked);
+      label.classList.toggle('bg-emerald-50', cb.checked);
+      label.classList.toggle('text-emerald-700', cb.checked);
+      label.classList.toggle('border-slate-300', !cb.checked);
+      label.classList.toggle('text-slate-600', !cb.checked);
+    });
+  });
+  document.getElementById('delete-client-btn').addEventListener('click', () => handleDeleteClient(clientId));
+  document.querySelectorAll('[data-remove-workout]').forEach(btn => {
+    btn.addEventListener('click', () => handleRemoveWorkout(btn.dataset.removeWorkout, clientId));
+  });
+  document.querySelectorAll('[data-reassign-workout]').forEach(sel => {
+    sel.addEventListener('change', (e) => { if (e.target.value) handleReassignWorkout(sel.dataset.reassignWorkout, e.target.value, clientId); });
+  });
+  document.querySelectorAll('[data-save-feedback]').forEach(btn => {
+    btn.addEventListener('click', () => handleSaveFeedback(btn.dataset.saveFeedback));
+  });
+}
+
+function renderCoachWorkoutRow(w, otherClients) {
+  const dayInfo = [
+    w.day_label || null,
+    w.days_of_week && w.days_of_week.length ? w.days_of_week.map(d => WEEKDAY_LABELS[d]).join('/') : null
+  ].filter(Boolean).join(' · ');
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-center justify-between gap-3">
+      <div class="min-w-0">
+        <h3 class="font-medium text-slate-900 text-sm truncate">${escapeHtml(w.exercise_name)}</h3>
+        <p class="text-xs text-slate-500 mt-1">${w.sets} sets · ${escapeHtml(w.target_reps)}${w.target_weight ? ` · ${escapeHtml(w.target_weight)}` : ''}</p>
+        ${dayInfo ? `<p class="text-xs text-emerald-700 mt-1">${escapeHtml(dayInfo)}</p>` : ''}
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        ${otherClients.length ? `
+          <select data-reassign-workout="${w.id}" class="text-xs bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-slate-600">
+            <option value="">Reassign…</option>
+            ${otherClients.map(c => `<option value="${escapeAttr(c.id)}">${escapeHtml(c.name || c.email)}</option>`).join('')}
+          </select>
+        ` : ''}
+        <button data-remove-workout="${w.id}" class="text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:border-red-300 hover:text-red-600 transition">Remove</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderCoachLogRow(log) {
+  const date = new Date(log.logged_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const metrics = [log.weight ? `${log.weight}kg` : null, log.water_liters ? `${log.water_liters}L water` : null].filter(Boolean).join(' · ');
+  const measurements = [
+    log.waist_cm ? `Waist ${log.waist_cm}cm` : null,
+    log.chest_cm ? `Chest ${log.chest_cm}cm` : null,
+    log.hips_cm ? `Hips ${log.hips_cm}cm` : null,
+    log.arms_cm ? `Arms ${log.arms_cm}cm` : null
+  ].filter(Boolean).join(' · ');
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-2">
+      <div class="flex items-center justify-between">
+        <p class="text-xs text-slate-500">${date}</p>
+        ${metrics ? `<p class="text-xs font-medium text-slate-700">${escapeHtml(metrics)}</p>` : ''}
+      </div>
+      ${measurements ? `<p class="text-xs text-slate-500">${escapeHtml(measurements)}</p>` : ''}
+      ${log.pr_notes ? `<p class="text-sm text-slate-800">${escapeHtml(log.pr_notes)}</p>` : ''}
+      <div class="border-t border-slate-100 pt-2 mt-1">
+        <label class="text-xs text-slate-500 mb-1 block">Your feedback</label>
+        <textarea id="feedback-${log.id}" rows="2" placeholder="Nice work — try adding 2.5kg next time..."
+          class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 resize-none">${escapeHtml(log.coach_feedback || '')}</textarea>
+        <button data-save-feedback="${log.id}" class="mt-2 text-xs font-medium text-emerald-700 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg px-3 py-1.5 transition">Save feedback</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderSparkline(values, { label = '', unit = '' } = {}) {
+  if (values.length < 2) return '';
+  const min = Math.min(...values), max = Math.max(...values);
+  const range = max - min || 1;
+  const w = 320, h = 80, pad = 8;
+  const coords = values.map((val, i) => {
+    const x = pad + (i / (values.length - 1)) * (w - pad * 2);
+    const y = pad + (1 - (val - min) / range) * (h - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+      <p class="text-xs text-slate-500 mb-2">${escapeHtml(label)} (${min}${unit}–${max}${unit})</p>
+      <svg viewBox="0 0 ${w} ${h}" class="w-full h-20" preserveAspectRatio="none">
+        <polyline points="${coords}" fill="none" stroke="#10b981" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+      </svg>
+    </div>
+  `;
+}
+
+function renderWeightSparkline(logs) {
+  const points = logs.filter(l => l.weight !== null && l.weight !== undefined).slice().reverse();
+  return renderSparkline(points.map(p => parseFloat(p.weight)), { label: 'Weight trend', unit: 'kg' });
+}
+
+async function handleDuplicatePlan(workouts, targetClientId) {
+  if (!targetClientId) { toast('Choose a client to duplicate to first.', 'info'); return; }
+  if (!workouts.length) { toast('This client has no workouts to duplicate.', 'info'); return; }
+  try {
+    const rows = workouts.map(w => ({
+      client_id: targetClientId,
+      exercise_name: w.exercise_name,
+      sets: w.sets,
+      target_reps: w.target_reps,
+      target_weight: w.target_weight,
+      video_url: w.video_url,
+      day_label: w.day_label,
+      days_of_week: w.days_of_week || [],
+      instructions: w.instructions
+    }));
+    const { error } = await sb.from('workouts').insert(rows);
+    if (error) throw error;
+    toast(`Plan duplicated — ${rows.length} exercise${rows.length === 1 ? '' : 's'} copied.`, 'success');
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not duplicate plan.', 'error');
+  }
+}
+
+function exportClientHistoryCSV(client, logs, setLogs) {
+  const rows = [['Type', 'Date', 'Exercise', 'Set #', 'Weight', 'Reps', 'Set type', 'Water (L)', 'Waist (cm)', 'Chest (cm)', 'Hips (cm)', 'Arms (cm)', 'Notes/Feedback']];
+  logs.forEach(l => {
+    rows.push(['Daily log', toDateStr(new Date(l.logged_at)), '', '', l.weight || '', '', '', l.water_liters || '', l.waist_cm || '', l.chest_cm || '', l.hips_cm || '', l.arms_cm || '', l.pr_notes || l.coach_feedback || '']);
+  });
+  setLogs.forEach(s => {
+    rows.push(['Set log', s.logged_date, s.exercise_name, s.set_number, s.weight || '', s.reps || '', s.set_type, '', '', '', '', '', '']);
+  });
+  const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${(client.name || client.email).replace(/[^a-z0-9]/gi, '_')}_history.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('CSV downloaded.', 'success');
+}
+
+async function handleEditClient(e, clientId) {
+  e.preventDefault();
+  const submitBtn = document.getElementById('edit-client-submit');
+  const label = document.getElementById('edit-client-submit-label');
+  submitBtn.disabled = true;
+  const originalLabel = label.textContent;
+  label.innerHTML = `<span class="spinner-light inline-block align-middle"></span>`;
+
+  try {
+    const restDays = [...document.querySelectorAll('[data-rest-day]:checked')].map(cb => parseInt(cb.dataset.restDay, 10));
+    const tags = document.getElementById('edit-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+    const { error } = await sb.from('profiles').update({
+      name: document.getElementById('edit-name').value.trim() || null,
+      phone: document.getElementById('edit-phone').value.trim() || null,
+      fee_paid: document.getElementById('edit-fee-paid').checked,
+      rest_days: restDays,
+      tags
+    }).eq('id', clientId);
+    if (error) throw error;
+    toast('Client updated.', 'success');
+    await renderCoachDashboardStub();
+    coachView = 'clientDetail';
+    selectedClientId = clientId;
+    renderActiveCoachView();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not update client.', 'error');
+    submitBtn.disabled = false;
+    label.textContent = originalLabel;
+  }
+}
+
+async function handleDeleteClient(clientId) {
+  const reassignSelect = document.getElementById('reassign-select');
+  const reassignTo = reassignSelect ? reassignSelect.value : '';
+
+  try {
+    if (reassignTo) {
+      const { error: reErr } = await sb.from('workouts').update({ client_id: reassignTo }).eq('client_id', clientId);
+      if (reErr) throw reErr;
+    }
+    const { error } = await sb.from('profiles').delete().eq('id', clientId);
+    if (error) throw error;
+    toast('Client removed.', 'success');
+    coachView = 'roster';
+    selectedClientId = null;
+    await renderCoachDashboardStub();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not remove client.', 'error');
+  }
+}
+
+async function handleRemoveWorkout(workoutId, clientId) {
+  try {
+    const { error } = await sb.from('workouts').delete().eq('id', workoutId);
+    if (error) throw error;
+    toast('Workout removed.', 'success');
+    renderClientDetailSection(clientId);
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not remove workout.', 'error');
+  }
+}
+
+async function handleReassignWorkout(workoutId, newClientId, currentClientId) {
+  try {
+    const { error } = await sb.from('workouts').update({ client_id: newClientId }).eq('id', workoutId);
+    if (error) throw error;
+    toast('Workout reassigned.', 'success');
+    renderClientDetailSection(currentClientId);
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not reassign workout.', 'error');
+  }
+}
+
+async function handleSaveFeedback(logId) {
+  const textarea = document.getElementById(`feedback-${logId}`);
+  try {
+    const { error } = await sb.from('progress_logs').update({
+      coach_feedback: textarea.value.trim() || null,
+      coach_feedback_at: new Date().toISOString()
+    }).eq('id', logId);
+    if (error) throw error;
+    toast('Feedback saved.', 'success');
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not save feedback.', 'error');
+  }
+}
+
+function timeAgo(isoString) {
+  const diffMs = Date.now() - new Date(isoString).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+/* ============================================================
+   SMALL HELPERS
+============================================================ */
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+function escapeAttr(str) {
+  return escapeHtml(str).replace(/'/g, '&#39;');
+}
+
+/* ============================================================
+   AUTH STATE LISTENER + BOOT
+============================================================ */
+sb.auth.onAuthStateChange((event) => {
+  if (event === 'SIGNED_OUT') render();
+});
+
+render();
+</script>
+</body>
+</html>
