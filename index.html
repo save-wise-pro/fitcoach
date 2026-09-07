@@ -476,17 +476,25 @@ function renderBadgesSection(badges) {
   `;
 }
 
+/* ============================================================
+   CLIENT DASHBOARD — tabbed: Home / Workouts / Progress / Profile
+============================================================ */
+let clientView = 'home';
+let clientData = null; // cached fetch result, shared across tabs
+
 async function renderClientDashboardStub() {
   const outlet = document.getElementById('dashboard-outlet');
   outlet.innerHTML = renderLoading();
   const todayStr = toDateStr(new Date());
 
-  const [workoutsRes, logsRes, completionsRes, photosRes, setLogsRes] = await Promise.all([
+  const [workoutsRes, logsRes, completionsRes, photosRes, setLogsRes, coachRes, bodyCompRes] = await Promise.all([
     sb.from('workouts').select('*').eq('client_id', currentUser.id).order('created_at', { ascending: false }),
-    sb.from('progress_logs').select('*').eq('client_id', currentUser.id).order('logged_at', { ascending: false }).limit(30),
+    sb.from('progress_logs').select('*').eq('client_id', currentUser.id).order('logged_at', { ascending: false }).limit(60),
     sb.from('workout_completions').select('*').eq('client_id', currentUser.id).order('completed_date', { ascending: false }).limit(120),
     sb.from('progress_photos').select('*').eq('client_id', currentUser.id).order('taken_at', { ascending: false }).limit(12),
-    sb.from('workout_set_logs').select('*').eq('client_id', currentUser.id).order('logged_date', { ascending: false }).limit(500)
+    sb.from('workout_set_logs').select('*').eq('client_id', currentUser.id).order('logged_date', { ascending: false }).limit(500),
+    currentProfile.coach_id ? sb.from('profiles').select('name,email,phone').eq('id', currentProfile.coach_id).single() : Promise.resolve({ data: null }),
+    sb.from('body_composition_logs').select('*').eq('client_id', currentUser.id).order('report_date', { ascending: false }).limit(30)
   ]);
 
   if (workoutsRes.error) {
@@ -500,20 +508,217 @@ async function renderClientDashboardStub() {
   const completions = completionsRes.data || [];
   const photos = photosRes.data || [];
   cachedSetLogs = setLogsRes.data || [];
-  const todaySetLogsByWorkout = {};
-  cachedSetLogs.filter(s => s.logged_date === todayStr).forEach(s => {
-    (todaySetLogsByWorkout[s.workout_id] = todaySetLogsByWorkout[s.workout_id] || []).push(s);
-  });
-  const loggedExercises = [...new Set(cachedSetLogs.filter(s => s.weight).map(s => s.exercise_name))].sort();
-  const feedbackLogs = logs.filter(l => l.coach_feedback).slice(0, 5);
-  const todayDoneIds = new Set(completions.filter(c => c.completed_date === todayStr).map(c => c.workout_id));
+  const coach = coachRes.data || null;
+  const bodyComp = bodyCompRes.data || [];
   const restDays = currentProfile.rest_days || [];
-  const isRestDayToday = restDays.includes(new Date().getDay());
 
   const streakDates = [...new Set([
     ...logs.map(l => toDateStr(new Date(l.logged_at))),
     ...completions.map(c => c.completed_date)
   ])];
+
+  clientData = { workouts, logs, completions, photos, coach, bodyComp, restDays, streakDates, todayStr };
+
+  outlet.innerHTML = `
+    <div class="animate-fade-in flex flex-col gap-6 pb-24">
+      ${renderClientTabsBar()}
+      <div id="client-view-outlet"></div>
+    </div>
+  `;
+  attachClientTabHandlers();
+  renderActiveClientView();
+}
+
+function renderClientTabsBar() {
+  const tabs = [
+    { id: 'home', label: 'Home' },
+    { id: 'workouts', label: 'Workouts' },
+    { id: 'progress', label: 'Progress' },
+    { id: 'profile', label: 'Profile' }
+  ];
+  return `
+    <div class="flex bg-slate-100 rounded-xl p-1">
+      ${tabs.map(t => `
+        <button data-client-tab="${t.id}" class="flex-1 py-2 rounded-lg text-sm font-medium transition ${clientView === t.id ? 'bg-emerald-500 text-white' : 'text-slate-500'}">
+          ${t.label}
+        </button>
+      `).join('')}
+    </div>
+  `;
+}
+
+function attachClientTabHandlers() {
+  document.querySelectorAll('[data-client-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      clientView = btn.dataset.clientTab;
+      document.getElementById('dashboard-outlet').querySelector('.flex.bg-slate-100').outerHTML = renderClientTabsBar();
+      attachClientTabHandlers();
+      renderActiveClientView();
+    });
+  });
+}
+
+function renderActiveClientView() {
+  const viewOutlet = document.getElementById('client-view-outlet');
+  if (clientView === 'home') viewOutlet.innerHTML = renderClientHomeTab();
+  else if (clientView === 'workouts') viewOutlet.innerHTML = renderClientWorkoutsTab();
+  else if (clientView === 'progress') viewOutlet.innerHTML = renderClientProgressTab();
+  else if (clientView === 'profile') viewOutlet.innerHTML = renderClientProfileTab();
+  attachActiveClientViewHandlers();
+}
+
+/* ---------------- HOME ---------------- */
+function renderClientHomeTab() {
+  const { logs, completions, streakDates, restDays } = clientData;
+  const streak = computeStreak(streakDates, restDays);
+  const adherence = computeAdherence(streakDates, restDays, 7);
+  const isRestDayToday = restDays.includes(new Date().getDay());
+  const weightPoints = logs.filter(l => l.weight !== null && l.weight !== undefined).slice().reverse();
+  const feedbackLogs = logs.filter(l => l.coach_feedback).slice(0, 1);
+
+  return `
+    <div class="flex flex-col gap-6">
+      <div>
+        <h1 class="font-display text-xl font-semibold text-slate-900">Hi, ${escapeHtml((currentProfile.name || currentUser.email).split(' ')[0])} 👋</h1>
+        <div class="flex items-center gap-2 mt-2 flex-wrap">
+          ${streak > 0 ? `<span class="flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-1">🔥 ${streak} day streak</span>` : ''}
+          <span class="flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2.5 py-1">${adherence.completed}/${adherence.expected} this week</span>
+          ${isRestDayToday ? `<span class="flex items-center gap-1 text-xs font-medium text-slate-600 bg-slate-100 border border-slate-200 rounded-full px-2.5 py-1">🌙 Rest day</span>` : ''}
+        </div>
+      </div>
+
+      ${renderWeightDashboardCard(weightPoints)}
+
+      ${clientData.bodyComp.length ? `
+      <div>
+        <div class="flex items-center justify-between mb-1">
+          <h2 class="font-display text-lg font-semibold text-slate-900">Body composition</h2>
+          <button data-goto-tab="progress" class="text-xs font-medium text-emerald-700">Full history</button>
+        </div>
+        ${renderBodyCompSummaryCard(clientData.bodyComp)}
+      </div>
+      ` : ''}
+
+      <div>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Log today</h2>
+        <p class="text-sm text-slate-500 mb-4">All fields optional — log whatever you've got.</p>
+        ${renderLogForm()}
+      </div>
+
+      ${feedbackLogs.length ? `
+      <div>
+        <div class="flex items-center justify-between mb-1">
+          <h2 class="font-display text-lg font-semibold text-slate-900">Coach feedback</h2>
+          <button data-goto-tab="progress" class="text-xs font-medium text-emerald-700">See all</button>
+        </div>
+        <div class="flex flex-col gap-3">
+          ${feedbackLogs.map(renderFeedbackCard).join('')}
+        </div>
+      </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function renderWeightDashboardCard(weightPoints) {
+  if (!weightPoints.length) {
+    return `
+      <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm text-center py-8">
+        <p class="text-sm text-slate-500">No weight logged yet.</p>
+        <p class="text-xs text-slate-400 mt-1">Log your weight below to start your trend.</p>
+      </div>
+    `;
+  }
+  const latest = parseFloat(weightPoints[weightPoints.length - 1].weight);
+  const prev = weightPoints.length > 1 ? parseFloat(weightPoints[weightPoints.length - 2].weight) : null;
+  const delta = prev !== null ? +(latest - prev).toFixed(1) : null;
+  const deltaColor = delta === null ? 'text-slate-400' : delta < 0 ? 'text-emerald-600' : delta > 0 ? 'text-amber-600' : 'text-slate-400';
+  const deltaText = delta === null ? '' : delta === 0 ? 'No change' : `${delta > 0 ? '+' : ''}${delta}kg since last log`;
+
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+      <div class="flex items-end justify-between mb-2">
+        <div>
+          <p class="text-xs text-slate-500">Current weight</p>
+          <p class="text-2xl font-semibold text-slate-900">${latest}<span class="text-sm font-normal text-slate-400">kg</span></p>
+        </div>
+        ${deltaText ? `<p class="text-xs font-medium ${deltaColor}">${deltaText}</p>` : ''}
+      </div>
+      ${weightPoints.length >= 2 ? `
+        <svg viewBox="0 0 320 90" class="w-full h-24" preserveAspectRatio="none">
+          ${(() => {
+            const weights = weightPoints.map(p => parseFloat(p.weight));
+            const min = Math.min(...weights), max = Math.max(...weights), range = max - min || 1;
+            const coords = weights.map((val, i) => {
+              const x = 6 + (i / (weights.length - 1)) * (320 - 12);
+              const y = 8 + (1 - (val - min) / range) * (90 - 16);
+              return [x, y];
+            });
+            const line = coords.map(c => c.join(',')).join(' ');
+            const area = `6,90 ${line} 314,90`;
+            return `
+              <polygon points="${area}" fill="#10b981" fill-opacity="0.08" />
+              <polyline points="${line}" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
+            `;
+          })()}
+        </svg>
+      ` : `<p class="text-xs text-slate-400 mt-3">Log weight a couple more times to see a trend.</p>`}
+    </div>
+  `;
+}
+
+/* ---------------- WORKOUTS ---------------- */
+function renderClientWorkoutsTab() {
+  const { workouts, completions, restDays, todayStr } = clientData;
+  const isRestDayToday = restDays.includes(new Date().getDay());
+  const todayDow = new Date().getDay();
+  const todaysWorkouts = workouts.filter(w => !w.days_of_week || !w.days_of_week.length || w.days_of_week.includes(todayDow));
+  const hasAnySchedule = workouts.some(w => w.days_of_week && w.days_of_week.length);
+  const todayDoneIds = new Set(completions.filter(c => c.completed_date === todayStr).map(c => c.workout_id));
+  const todaySetLogsByWorkout = {};
+  cachedSetLogs.filter(s => s.logged_date === todayStr).forEach(s => {
+    (todaySetLogsByWorkout[s.workout_id] = todaySetLogsByWorkout[s.workout_id] || []).push(s);
+  });
+  const loggedExercises = [...new Set(cachedSetLogs.filter(s => s.weight).map(s => s.exercise_name))].sort();
+
+  return `
+    <div class="flex flex-col gap-6">
+      <div>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Today's plan</h2>
+        <p class="text-sm text-slate-500 mb-4">Assigned by your coach.</p>
+        ${isRestDayToday ? `
+          <div class="text-center py-6 border border-slate-200 bg-slate-50 rounded-2xl mb-3">
+            <p class="text-sm font-medium text-slate-700">🌙 Today's a scheduled rest day</p>
+            <p class="text-xs text-slate-500 mt-1">Recover well — your streak stays safe.</p>
+          </div>
+        ` : ''}
+        <div class="flex flex-col gap-3">
+          ${todaysWorkouts.length ? todaysWorkouts.map(w => renderWorkoutCard(w, todayDoneIds.has(w.id), todaySetLogsByWorkout[w.id] || [])).join('') : renderEmptyWorkouts()}
+        </div>
+      </div>
+
+      ${hasAnySchedule ? `
+      <div>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Weekly schedule</h2>
+        <p class="text-sm text-slate-500 mb-4">What's assigned across your week.</p>
+        ${renderWeeklySchedule(workouts, restDays)}
+      </div>
+      ` : ''}
+
+      ${loggedExercises.length ? `
+      <div>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Your lifts</h2>
+        <p class="text-sm text-slate-500 mb-4">Progression by exercise, from your logged sets.</p>
+        ${renderLiftProgressionPicker(loggedExercises, cachedSetLogs)}
+      </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+/* ---------------- PROGRESS ---------------- */
+function renderClientProgressTab() {
+  const { logs, completions, photos, streakDates, restDays } = clientData;
   const streak = computeStreak(streakDates, restDays);
   const adherence = computeAdherence(streakDates, restDays, 7);
   const sinceJoined = computeSinceJoined(logs, cachedSetLogs);
@@ -525,86 +730,48 @@ async function renderClientDashboardStub() {
     hasMeasurement: logs.some(l => l.waist_cm || l.chest_cm || l.hips_cm || l.arms_cm),
     hasPhoto: photos.length > 0
   });
-
-  const todayDow = new Date().getDay();
-  const todaysWorkouts = workouts.filter(w => !w.days_of_week || !w.days_of_week.length || w.days_of_week.includes(todayDow));
-  const hasAnySchedule = workouts.some(w => w.days_of_week && w.days_of_week.length);
   const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 6);
-  const weekAgoStr = toDateStr(weekAgo);
-  const setsThisWeek = cachedSetLogs.filter(s => s.logged_date >= weekAgoStr).length;
+  const setsThisWeek = cachedSetLogs.filter(s => s.logged_date >= toDateStr(weekAgo)).length;
+  const feedbackLogs = logs.filter(l => l.coach_feedback).slice(0, 5);
 
-  outlet.innerHTML = `
-    <div class="animate-fade-in flex flex-col gap-8 pb-24">
-      <section>
-        <div class="flex items-center justify-between gap-2 mb-1">
-          <h2 class="font-display text-lg font-semibold text-slate-900">Today's plan</h2>
-          <div class="shrink-0 flex items-center gap-2">
-            ${streak > 0 ? `<span class="flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-1">🔥 ${streak}</span>` : ''}
-            <span class="flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2.5 py-1">${adherence.completed}/${adherence.expected} this week</span>
-          </div>
-        </div>
-        <p class="text-sm text-slate-500 mb-4">Assigned by your coach.</p>
-        ${isRestDayToday ? `
-          <div class="text-center py-6 border border-slate-200 bg-slate-50 rounded-2xl mb-3">
-            <p class="text-sm font-medium text-slate-700">🌙 Today's a scheduled rest day</p>
-            <p class="text-xs text-slate-500 mt-1">Recover well — your streak stays safe.</p>
-          </div>
-        ` : ''}
-        <div class="flex flex-col gap-3">
-          ${todaysWorkouts.length ? todaysWorkouts.map(w => renderWorkoutCard(w, todayDoneIds.has(w.id), todaySetLogsByWorkout[w.id] || [])).join('') : renderEmptyWorkouts()}
-        </div>
-      </section>
-
-      ${hasAnySchedule ? `
-      <section>
-        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Weekly schedule</h2>
-        <p class="text-sm text-slate-500 mb-4">What's assigned across your week.</p>
-        ${renderWeeklySchedule(workouts, restDays)}
-      </section>
-      ` : ''}
-
-      ${loggedExercises.length ? `
-      <section>
-        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Your lifts</h2>
-        <p class="text-sm text-slate-500 mb-4">Progression by exercise, from your logged sets.</p>
-        ${renderLiftProgressionPicker(loggedExercises, cachedSetLogs)}
-      </section>
-      ` : ''}
-
-      <section>
-        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Your progress</h2>
-        <p class="text-sm text-slate-500 mb-4">How things are trending overall.</p>
+  return `
+    <div class="flex flex-col gap-8">
+      <div>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Trends</h2>
+        <p class="text-sm text-slate-500 mb-4">How things are moving overall.</p>
         <div class="flex flex-col gap-3">
           ${renderSinceJoinedCard(sinceJoined)}
           ${renderAdherenceTrendSection(streakDates, restDays)}
         </div>
-      </section>
+      </div>
 
       ${feedbackLogs.length ? `
-      <section>
+      <div>
         <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Coach feedback</h2>
         <p class="text-sm text-slate-500 mb-4">Notes on your recent logs.</p>
         <div class="flex flex-col gap-3">
           ${feedbackLogs.map(renderFeedbackCard).join('')}
         </div>
-      </section>
+      </div>
       ` : ''}
 
       ${renderBadgesSection(badges)}
 
-      <section>
+      <div>
         <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Your week</h2>
         <p class="text-sm text-slate-500 mb-4">A shareable snapshot of this week.</p>
         ${renderWeeklyRecapCard({ streak, adherence, badges, setsThisWeek, clientName: currentProfile.name || currentUser.email })}
-      </section>
+      </div>
 
-      <section>
-        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Log today</h2>
-        <p class="text-sm text-slate-500 mb-4">All fields optional — log whatever you've got.</p>
-        ${renderLogForm()}
-      </section>
+      <div>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Body composition report</h2>
+        <p class="text-sm text-slate-500 mb-4">Optional — log numbers from a scan report to track them over time.</p>
+        <div class="flex flex-col gap-3 mb-3">${renderBodyCompTrends(clientData.bodyComp)}</div>
+        ${renderBodyCompForm()}
+        ${renderBodyCompHistory(clientData.bodyComp)}
+      </div>
 
-      <section>
+      <div>
         <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Progress photos</h2>
         <p class="text-sm text-slate-500 mb-4">Optional — snap your progress over time.</p>
         ${renderPhotoUploadForm()}
@@ -614,26 +781,135 @@ async function renderClientDashboardStub() {
           </div>
         ` : ''}
         ${renderPhotoCompareSection(photos)}
-      </section>
+      </div>
 
-      <section>
+      <div>
         <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Your history</h2>
         <p class="text-sm text-slate-500 mb-4">Recent logs.</p>
         <div class="flex flex-col gap-3">
           ${logs.length ? logs.slice(0, 10).map(renderClientHistoryRow).join('') : `
-            <div class="text-center py-8 border border-dashed border-slate-300 rounded-2xl text-sm text-slate-400">No logs yet — save one above.</div>
+            <div class="text-center py-8 border border-dashed border-slate-300 rounded-2xl text-sm text-slate-400">No logs yet — save one on the Home tab.</div>
           `}
         </div>
-      </section>
+      </div>
     </div>
   `;
+}
 
+/* ---------------- PROFILE ---------------- */
+function renderClientProfileTab() {
+  const { coach, restDays } = clientData;
+  return `
+    <div class="flex flex-col gap-6">
+      <div>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-4">Your info</h2>
+        <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-3">
+          <div>
+            <p class="text-xs text-slate-500">Name</p>
+            <p class="text-sm text-slate-900">${escapeHtml(currentProfile.name || '—')}</p>
+          </div>
+          <div>
+            <p class="text-xs text-slate-500">Email</p>
+            <p class="text-sm text-slate-900">${escapeHtml(currentUser.email)}</p>
+          </div>
+          <div>
+            <p class="text-xs text-slate-500">Phone</p>
+            <p class="text-sm text-slate-900">${escapeHtml(currentProfile.phone || '—')}</p>
+          </div>
+          ${restDays.length ? `
+            <div>
+              <p class="text-xs text-slate-500">Rest days</p>
+              <p class="text-sm text-slate-900">${restDays.map(d => WEEKDAY_LABELS[d]).join(', ')}</p>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+
+      ${coach ? `
+      <div>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-4">Your coach</h2>
+        <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-center justify-between gap-3">
+          <div>
+            <p class="text-sm font-medium text-slate-900">${escapeHtml(coach.name || coach.email)}</p>
+            <p class="text-xs text-slate-500 mt-0.5">${escapeHtml(coach.email)}</p>
+          </div>
+          ${coach.phone ? `
+            <a href="https://wa.me/${escapeAttr(coach.phone.replace(/[^0-9]/g, ''))}?text=${encodeURIComponent('Hi! Just checking in about my training.')}" target="_blank" rel="noopener noreferrer"
+              class="shrink-0 flex items-center gap-1.5 bg-emerald-500 text-white rounded-lg px-3 py-2 text-xs font-medium hover:bg-emerald-600 transition">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0012.04 2zm0 18.15h-.01a8.2 8.2 0 01-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.2 8.2 0 01-1.26-4.38c0-4.54 3.7-8.24 8.25-8.24 2.2 0 4.27.86 5.83 2.42a8.18 8.18 0 012.41 5.83c0 4.55-3.7 8.23-8.24 8.23zm4.52-6.16c-.25-.12-1.47-.72-1.69-.81-.23-.08-.4-.12-.56.13-.17.25-.64.81-.79.97-.14.17-.29.19-.54.06-.25-.12-1.05-.39-2-1.23-.74-.66-1.24-1.47-1.39-1.72-.14-.25-.02-.38.11-.51.11-.11.25-.29.37-.43.12-.14.16-.25.25-.41.08-.17.04-.31-.02-.43-.06-.12-.56-1.35-.77-1.85-.2-.48-.41-.42-.56-.43-.14-.01-.31-.01-.48-.01-.17 0-.43.06-.66.31-.23.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.17 1.75 2.67 4.24 3.74.59.26 1.06.41 1.42.52.6.19 1.14.16 1.57.1.48-.07 1.47-.6 1.68-1.18.21-.58.21-1.07.14-1.18-.06-.1-.23-.16-.48-.28z"/></svg>
+              Message
+            </a>
+          ` : ''}
+        </div>
+      </div>
+      ` : ''}
+
+      <div>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-4">Update your info</h2>
+        <form id="profile-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Name</label>
+            <input type="text" id="profile-name" value="${escapeAttr(currentProfile.name || '')}"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Phone</label>
+            <input type="tel" id="profile-phone" value="${escapeAttr(currentProfile.phone || '')}" placeholder="+1 555 123 4567"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          </div>
+          <button type="submit" id="profile-submit" class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-2.5 text-sm transition flex items-center justify-center gap-2">
+            <span id="profile-submit-label">Save</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+async function handleProfileUpdate(e) {
+  e.preventDefault();
+  const submitBtn = document.getElementById('profile-submit');
+  const label = document.getElementById('profile-submit-label');
+  submitBtn.disabled = true;
+  const originalLabel = label.textContent;
+  label.innerHTML = `<span class="spinner-light inline-block align-middle"></span>`;
+  try {
+    const { error } = await sb.from('profiles').update({
+      name: document.getElementById('profile-name').value.trim() || null,
+      phone: document.getElementById('profile-phone').value.trim() || null
+    }).eq('id', currentUser.id);
+    if (error) throw error;
+    currentProfile.name = document.getElementById('profile-name').value.trim() || null;
+    currentProfile.phone = document.getElementById('profile-phone').value.trim() || null;
+    toast('Saved.', 'success');
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not save.', 'error');
+  } finally {
+    submitBtn.disabled = false;
+    label.textContent = originalLabel;
+  }
+}
+
+function attachActiveClientViewHandlers() {
   const logForm = document.getElementById('log-form');
   if (logForm) logForm.addEventListener('submit', handleLogSubmit);
   const downloadRecapBtn = document.getElementById('download-recap-btn');
   if (downloadRecapBtn) downloadRecapBtn.addEventListener('click', handleDownloadRecap);
   const photoForm = document.getElementById('photo-form');
   if (photoForm) photoForm.addEventListener('submit', handlePhotoUpload);
+  const bodyCompForm = document.getElementById('bodycomp-form');
+  if (bodyCompForm) bodyCompForm.addEventListener('submit', handleSaveBodyComp);
+  const profileForm = document.getElementById('profile-form');
+  if (profileForm) profileForm.addEventListener('submit', handleProfileUpdate);
+  document.querySelectorAll('[data-goto-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      clientView = btn.dataset.gotoTab;
+      document.getElementById('dashboard-outlet').querySelector('.flex.bg-slate-100').outerHTML = renderClientTabsBar();
+      attachClientTabHandlers();
+      renderActiveClientView();
+    });
+  });
   document.querySelectorAll('[data-toggle-complete]').forEach(cb => {
     cb.addEventListener('change', (e) => handleToggleComplete(e.target.dataset.toggleComplete, e.target.checked));
   });
@@ -654,8 +930,9 @@ async function renderClientDashboardStub() {
   });
   const liftPicker = document.getElementById('lift-picker');
   if (liftPicker) liftPicker.addEventListener('change', () => renderLiftChart(liftPicker.value, cachedSetLogs));
-  if (loggedExercises.length) renderLiftChart(loggedExercises[0], cachedSetLogs);
-  initPhotoCompareSlider(photos);
+  const loggedExercises = [...new Set(cachedSetLogs.filter(s => s.weight).map(s => s.exercise_name))].sort();
+  if (liftPicker && loggedExercises.length) renderLiftChart(loggedExercises[0], cachedSetLogs);
+  initPhotoCompareSlider(clientData.photos);
 }
 
 function renderWeeklyRecapCard({ streak, adherence, badges, setsThisWeek, clientName }) {
@@ -887,6 +1164,147 @@ function renderSinceJoinedCard(since) {
     <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
       <p class="text-xs text-slate-500 mb-1">Since you joined</p>
       <p class="text-sm text-slate-700">${parts.join(' · ')}</p>
+    </div>
+  `;
+}
+
+/* ---------------- BODY COMPOSITION REPORT ---------------- */
+const BODYCOMP_FIELDS_PRIMARY = [
+  { id: 'weight_kg', label: 'Weight', unit: 'kg' },
+  { id: 'body_fat_pct', label: 'Body fat', unit: '%' },
+  { id: 'muscle_mass_kg', label: 'Muscle mass', unit: 'kg' },
+  { id: 'bmi', label: 'BMI', unit: '' },
+  { id: 'visceral_fat_grade', label: 'Visceral fat grade', unit: '' },
+  { id: 'bmr_kcal', label: 'BMR', unit: 'kcal' }
+];
+const BODYCOMP_FIELDS_MORE = [
+  { id: 'fat_mass_kg', label: 'Fat mass', unit: 'kg' },
+  { id: 'skeletal_muscle_kg', label: 'Skeletal muscle', unit: 'kg' },
+  { id: 'bone_mass_kg', label: 'Bone mass', unit: 'kg' },
+  { id: 'protein_mass_kg', label: 'Protein mass', unit: 'kg' },
+  { id: 'water_weight_kg', label: 'Water weight', unit: 'kg' },
+  { id: 'body_age', label: 'Body age', unit: '' },
+  { id: 'whr', label: 'WHR', unit: '' },
+  { id: 'icw_kg', label: 'ICW (intracellular water)', unit: 'kg' },
+  { id: 'ecw_kg', label: 'ECW (extracellular water)', unit: 'kg' },
+  { id: 'smi', label: 'SMI', unit: '' },
+  { id: 'subcutaneous_fat_pct', label: 'Subcutaneous fat', unit: '%' },
+  { id: 'fat_free_weight_kg', label: 'Fat-free body weight', unit: 'kg' }
+];
+
+function renderBodyCompField(f) {
+  return `
+    <div>
+      <label class="text-xs text-slate-500 mb-1 block">${f.label}${f.unit ? ` (${f.unit})` : ''}</label>
+      <input type="number" step="0.1" id="bc-${f.id}"
+        class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+    </div>
+  `;
+}
+
+function renderBodyCompForm() {
+  return `
+    <form id="bodycomp-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
+      <p class="text-xs text-slate-500">Optional — add numbers from a body composition scan (like an InBody report) to track them over time.</p>
+      <div>
+        <label class="text-xs text-slate-500 mb-1 block">Report date</label>
+        <input type="date" id="bc-report_date" value="${toDateStr(new Date())}"
+          class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        ${BODYCOMP_FIELDS_PRIMARY.map(renderBodyCompField).join('')}
+      </div>
+      <details class="group">
+        <summary class="text-xs font-medium text-emerald-700 cursor-pointer select-none list-none flex items-center gap-1">
+          <span class="group-open:rotate-90 transition-transform inline-block">▸</span> More details (optional)
+        </summary>
+        <div class="grid grid-cols-2 gap-3 mt-3">
+          ${BODYCOMP_FIELDS_MORE.map(renderBodyCompField).join('')}
+        </div>
+      </details>
+      <button type="submit" id="bodycomp-submit" class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-2.5 text-sm transition flex items-center justify-center gap-2">
+        <span id="bodycomp-submit-label">Save report</span>
+      </button>
+    </form>
+  `;
+}
+
+async function handleSaveBodyComp(e) {
+  e.preventDefault();
+  const allFields = [...BODYCOMP_FIELDS_PRIMARY, ...BODYCOMP_FIELDS_MORE];
+  const values = {};
+  let anyFilled = false;
+  allFields.forEach(f => {
+    const raw = document.getElementById(`bc-${f.id}`).value;
+    values[f.id] = raw ? parseFloat(raw) : null;
+    if (raw) anyFilled = true;
+  });
+  if (!anyFilled) { toast('Add at least one value before saving.', 'info'); return; }
+
+  const submitBtn = document.getElementById('bodycomp-submit');
+  const label = document.getElementById('bodycomp-submit-label');
+  submitBtn.disabled = true;
+  const originalLabel = label.textContent;
+  label.innerHTML = `<span class="spinner-light inline-block align-middle"></span>`;
+
+  try {
+    const { error } = await sb.from('body_composition_logs').insert({
+      client_id: currentUser.id,
+      report_date: document.getElementById('bc-report_date').value || toDateStr(new Date()),
+      ...values
+    });
+    if (error) throw error;
+    toast('Body composition report saved.', 'success');
+    await renderClientDashboardStub();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not save report.', 'error');
+    submitBtn.disabled = false;
+    label.textContent = originalLabel;
+  }
+}
+
+function renderBodyCompSummaryCard(entries) {
+  if (!entries.length) return '';
+  const latest = entries[0]; // fetched newest-first
+  const chips = BODYCOMP_FIELDS_PRIMARY.filter(f => latest[f.id] !== null && latest[f.id] !== undefined)
+    .map(f => `<div class="bg-slate-50 rounded-xl p-2.5 text-center"><p class="text-sm font-semibold text-slate-900">${latest[f.id]}${f.unit}</p><p class="text-[10px] text-slate-500 mt-0.5">${f.label}</p></div>`)
+    .join('');
+  if (!chips) return '';
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+      <p class="text-xs text-slate-500 mb-3">Latest report — ${escapeHtml(new Date(latest.report_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }))}</p>
+      <div class="grid grid-cols-3 gap-2">${chips}</div>
+    </div>
+  `;
+}
+
+function renderBodyCompTrends(entries) {
+  if (entries.length < 2) return '';
+  const sorted = entries.slice().reverse(); // oldest first
+  const charts = [
+    { field: 'body_fat_pct', label: 'Body fat', unit: '%' },
+    { field: 'muscle_mass_kg', label: 'Muscle mass', unit: 'kg' }
+  ].map(c => {
+    const points = sorted.filter(e => e[c.field] !== null && e[c.field] !== undefined).map(e => parseFloat(e[c.field]));
+    return points.length >= 2 ? renderSparkline(points, { label: c.label, unit: c.unit }) : '';
+  }).filter(Boolean).join('');
+  return charts;
+}
+
+function renderBodyCompHistory(entries) {
+  if (!entries.length) return '';
+  return `
+    <div class="flex flex-col gap-2 mt-3">
+      ${entries.slice(0, 8).map(e => {
+        const parts = BODYCOMP_FIELDS_PRIMARY.filter(f => e[f.id] !== null && e[f.id] !== undefined).map(f => `${f.label}: ${e[f.id]}${f.unit}`);
+        return `
+          <div class="bg-white border border-slate-200 rounded-2xl p-3 shadow-sm">
+            <p class="text-xs text-slate-500">${escapeHtml(new Date(e.report_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }))}</p>
+            ${parts.length ? `<p class="text-xs text-slate-700 mt-1">${escapeHtml(parts.join(' · '))}</p>` : ''}
+          </div>
+        `;
+      }).join('')}
     </div>
   `;
 }
@@ -1259,7 +1677,7 @@ async function handleLogSubmit(e) {
     if (error) throw error;
 
     toast('Logged. Nice work today.', 'success');
-    document.getElementById('log-form').reset();
+    await renderClientDashboardStub();
   } catch (err) {
     console.error(err);
     toast(err.message || 'Could not save your log.', 'error');
