@@ -898,6 +898,10 @@ function attachActiveClientViewHandlers() {
   if (downloadRecapBtn) downloadRecapBtn.addEventListener('click', handleDownloadRecap);
   const photoForm = document.getElementById('photo-form');
   if (photoForm) photoForm.addEventListener('submit', handlePhotoUpload);
+  const photoCameraInput = document.getElementById('photo-file-camera');
+  if (photoCameraInput) photoCameraInput.addEventListener('change', handlePhotoFileSelect);
+  const photoGalleryInput = document.getElementById('photo-file-gallery');
+  if (photoGalleryInput) photoGalleryInput.addEventListener('change', handlePhotoFileSelect);
   const bodyCompForm = document.getElementById('bodycomp-form');
   if (bodyCompForm) bodyCompForm.addEventListener('submit', handleSaveBodyComp);
   const profileForm = document.getElementById('profile-form');
@@ -1011,11 +1015,25 @@ function renderClientHistoryRow(log) {
   `;
 }
 
+let selectedPhotoFile = null;
+
 function renderPhotoUploadForm() {
   return `
     <form id="photo-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-3">
-      <input type="file" accept="image/*" id="photo-file"
-        class="text-sm text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 file:text-sm file:font-medium hover:file:bg-emerald-100" />
+      <div class="flex gap-2">
+        <label class="flex-1 flex items-center justify-center gap-1.5 text-sm font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg py-2.5 cursor-pointer hover:bg-emerald-100 transition">
+          📸 Take photo
+          <input type="file" accept="image/*" capture="environment" id="photo-file-camera" class="hidden" />
+        </label>
+        <label class="flex-1 flex items-center justify-center gap-1.5 text-sm font-medium text-slate-600 bg-slate-50 border border-slate-300 rounded-lg py-2.5 cursor-pointer hover:bg-slate-100 transition">
+          🖼️ Gallery
+          <input type="file" accept="image/*" id="photo-file-gallery" class="hidden" />
+        </label>
+      </div>
+      <div id="photo-preview-wrap" class="hidden flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg p-2">
+        <img id="photo-preview-img" class="w-12 h-12 rounded-lg object-cover" />
+        <p id="photo-preview-name" class="text-xs text-slate-600 truncate flex-1"></p>
+      </div>
       <input type="text" id="photo-note" placeholder="Optional note, e.g. Week 4"
         class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
       <button type="submit" id="photo-submit"
@@ -1024,6 +1042,18 @@ function renderPhotoUploadForm() {
       </button>
     </form>
   `;
+}
+
+function handlePhotoFileSelect(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  selectedPhotoFile = file;
+  const wrap = document.getElementById('photo-preview-wrap');
+  const img = document.getElementById('photo-preview-img');
+  const name = document.getElementById('photo-preview-name');
+  img.src = URL.createObjectURL(file);
+  name.textContent = file.name;
+  wrap.classList.remove('hidden');
 }
 
 function renderPhotoThumb(p) {
@@ -1095,9 +1125,8 @@ function initPhotoCompareSlider(photos) {
 
 async function handlePhotoUpload(e) {
   e.preventDefault();
-  const fileInput = document.getElementById('photo-file');
-  const file = fileInput.files[0];
-  if (!file) { toast('Choose a photo first.', 'info'); return; }
+  const file = selectedPhotoFile;
+  if (!file) { toast('Take or choose a photo first.', 'info'); return; }
 
   const submitBtn = document.getElementById('photo-submit');
   const label = document.getElementById('photo-submit-label');
@@ -1120,6 +1149,7 @@ async function handlePhotoUpload(e) {
     if (insErr) throw insErr;
 
     toast('Photo uploaded.', 'success');
+    selectedPhotoFile = null;
     await renderClientDashboardStub();
   } catch (err) {
     console.error(err);
@@ -1364,10 +1394,18 @@ function renderWeeklySchedule(workouts, restDays = []) {
   return `<div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm divide-y divide-slate-100">${days}</div>`;
 }
 
+// 'Sets' can now be alphanumeric (e.g. '3-4', 'AMRAP') — pull a usable row count for the
+// per-set logging panel from the first number found, falling back to a sane default.
+function parseSetsCount(setsValue) {
+  const match = String(setsValue ?? '').match(/\d+/);
+  const n = match ? parseInt(match[0], 10) : NaN;
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 20) : 3;
+}
+
 function renderWorkoutCard(w, isDone, todaySetLogs = []) {
   const setsById = {};
   todaySetLogs.forEach(s => { setsById[s.set_number] = s; });
-  const rows = Array.from({ length: w.sets }, (_, i) => i + 1).map(setNum => {
+  const rows = Array.from({ length: parseSetsCount(w.sets) }, (_, i) => i + 1).map(setNum => {
     const existing = setsById[setNum];
     return `
       <div class="grid grid-cols-[auto_1fr_1fr_1fr] gap-2 items-center">
@@ -1695,6 +1733,7 @@ let exerciseLibrary = [];   // cached reusable exercises
 let routineTemplates = [];  // cached templates with nested .items
 let coachView = 'roster';   // 'roster' | 'library' | 'templates' | 'clientDetail'
 let selectedClientId = null;
+let clientDetailView = 'overview'; // 'overview' | 'plan' | 'progress'
 let templateDraftItems = []; // exercises being added to a new template, in-memory
 let rosterSearch = '';
 let rosterStatusFilter = 'all'; // 'all' | 'paid' | 'pending'
@@ -1909,6 +1948,7 @@ function attachRosterCardHandlers() {
   document.querySelectorAll('[data-manage-client]').forEach(btn => {
     btn.addEventListener('click', () => {
       selectedClientId = btn.dataset.manageClient;
+      clientDetailView = 'overview';
       coachView = 'clientDetail';
       renderActiveCoachView();
     });
@@ -2044,12 +2084,12 @@ function renderWorkoutBuilder() {
       <div class="grid grid-cols-3 gap-3">
         <div>
           <label class="text-xs text-slate-500 mb-1 block">Sets</label>
-          <input required type="number" min="1" id="builder-sets" placeholder="4"
+          <input required type="text" id="builder-sets" inputmode="text" placeholder="e.g. 4"
             class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
         </div>
         <div>
           <label class="text-xs text-slate-500 mb-1 block">Reps</label>
-          <input required type="text" id="builder-reps" placeholder="8-10"
+          <input required type="text" id="builder-reps" inputmode="text" placeholder="8-10"
             class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
         </div>
         <div>
@@ -2116,7 +2156,7 @@ async function handleAssignWorkout(e) {
   e.preventDefault();
   const clientId = document.getElementById('builder-client').value;
   const exerciseName = document.getElementById('builder-exercise').value.trim();
-  const sets = document.getElementById('builder-sets').value;
+  const sets = document.getElementById('builder-sets').value.trim();
   const reps = document.getElementById('builder-reps').value.trim();
   const weight = document.getElementById('builder-weight').value.trim();
   const videoUrl = document.getElementById('builder-video').value.trim();
@@ -2134,7 +2174,7 @@ async function handleAssignWorkout(e) {
     const { error } = await sb.from('workouts').insert({
       client_id: clientId,
       exercise_name: exerciseName,
-      sets: parseInt(sets, 10),
+      sets: sets,
       target_reps: reps,
       target_weight: weight || null,
       video_url: videoUrl || null,
@@ -2174,8 +2214,8 @@ async function handleAssignTemplate(e) {
     const rows = clientIds.flatMap(clientId => template.items.map(item => ({
       client_id: clientId,
       exercise_name: item.exercise_name,
-      sets: item.sets,
-      target_reps: item.target_reps,
+      sets: item.sets || '1',
+      target_reps: item.target_reps || '—',
       target_weight: item.target_weight,
       video_url: item.video_url,
       day_label: item.day_label || null,
@@ -2231,12 +2271,12 @@ function renderLibrarySection() {
         <div class="grid grid-cols-3 gap-3">
           <div>
             <label class="text-xs text-slate-500 mb-1 block">Sets</label>
-            <input type="number" min="1" id="lib-sets" placeholder="4"
+            <input type="text" id="lib-sets" inputmode="text" placeholder="e.g. 4"
               class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
           </div>
           <div>
             <label class="text-xs text-slate-500 mb-1 block">Reps</label>
-            <input type="text" id="lib-reps" placeholder="8-10"
+            <input type="text" id="lib-reps" inputmode="text" placeholder="8-10"
               class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
           </div>
           <div>
@@ -2289,7 +2329,7 @@ async function handleAddLibraryExercise(e) {
     const { error } = await sb.from('exercise_library').insert({
       coach_id: currentUser.id,
       name: document.getElementById('lib-name').value.trim(),
-      default_sets: document.getElementById('lib-sets').value ? parseInt(document.getElementById('lib-sets').value, 10) : null,
+      default_sets: document.getElementById('lib-sets').value.trim() || null,
       default_reps: document.getElementById('lib-reps').value.trim() || null,
       default_weight: document.getElementById('lib-weight').value.trim() || null,
       video_url: document.getElementById('lib-video').value.trim() || null,
@@ -2354,9 +2394,9 @@ function renderTemplatesSection() {
           <input required type="text" id="draft-exercise" placeholder="Exercise name"
             class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
           <div class="grid grid-cols-3 gap-3">
-            <input required type="number" min="1" id="draft-sets" placeholder="Sets"
+            <input required type="text" id="draft-sets" inputmode="text" placeholder="e.g. 4"
               class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
-            <input required type="text" id="draft-reps" placeholder="Reps"
+            <input required type="text" id="draft-reps" inputmode="text" placeholder="e.g. 8-10"
               class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
             <input type="text" id="draft-weight" placeholder="Weight"
               class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
@@ -2413,7 +2453,7 @@ function handleAddDraftItem(e) {
   e.preventDefault();
   templateDraftItems.push({
     exercise_name: document.getElementById('draft-exercise').value.trim(),
-    sets: parseInt(document.getElementById('draft-sets').value, 10),
+    sets: document.getElementById('draft-sets').value.trim(),
     target_reps: document.getElementById('draft-reps').value.trim(),
     target_weight: document.getElementById('draft-weight').value.trim() || null,
     video_url: document.getElementById('draft-video').value.trim() || null,
@@ -2475,12 +2515,13 @@ async function renderClientDetailSection(clientId) {
   const client = coachClients.find(c => c.id === clientId);
   if (!client) { coachView = 'roster'; renderActiveCoachView(); return; }
 
-  const [workoutsRes, logsRes, completionsRes, photosRes, setLogsRes] = await Promise.all([
+  const [workoutsRes, logsRes, completionsRes, photosRes, setLogsRes, bodyCompRes] = await Promise.all([
     sb.from('workouts').select('*').eq('client_id', clientId).order('created_at', { ascending: false }),
     sb.from('progress_logs').select('*').eq('client_id', clientId).order('logged_at', { ascending: false }).limit(20),
     sb.from('workout_completions').select('*').eq('client_id', clientId).order('completed_date', { ascending: false }).limit(120),
     sb.from('progress_photos').select('*').eq('client_id', clientId).order('taken_at', { ascending: false }).limit(9),
-    sb.from('workout_set_logs').select('*').eq('client_id', clientId).order('logged_date', { ascending: false }).limit(500)
+    sb.from('workout_set_logs').select('*').eq('client_id', clientId).order('logged_date', { ascending: false }).limit(500),
+    sb.from('body_composition_logs').select('*').eq('client_id', clientId).order('report_date', { ascending: false }).limit(30)
   ]);
 
   const workouts = workoutsRes.data || [];
@@ -2488,6 +2529,7 @@ async function renderClientDetailSection(clientId) {
   const completions = completionsRes.data || [];
   const photos = photosRes.data || [];
   const clientSetLogs = setLogsRes.data || [];
+  const bodyComp = bodyCompRes.data || [];
   const loggedExercises = [...new Set(clientSetLogs.filter(s => s.weight).map(s => s.exercise_name))].sort();
   const otherClients = coachClients.filter(c => c.id !== clientId);
 
@@ -2507,6 +2549,8 @@ async function renderClientDetailSection(clientId) {
     hasPhoto: photos.length > 0
   });
 
+  const clientDetailData = { client, workouts, logs, completions, photos, clientSetLogs, bodyComp, loggedExercises, otherClients, badges, clientId };
+
   viewOutlet.innerHTML = `
     <button id="back-to-roster" class="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 mb-4">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
@@ -2521,6 +2565,37 @@ async function renderClientDetailSection(clientId) {
     </div>
     <p class="text-sm text-slate-500 mb-4">${adherence.completed}/${adherence.expected} training days hit this week · ${badges.filter(b => b.earned).length}/${badges.length} badges earned</p>
 
+    <div class="flex bg-slate-100 rounded-xl p-1 mb-6">
+      ${[{ id: 'overview', label: 'Overview' }, { id: 'plan', label: 'Plan' }, { id: 'progress', label: 'Progress' }].map(t => `
+        <button data-client-detail-tab="${t.id}" class="flex-1 py-2 rounded-lg text-sm font-medium transition ${clientDetailView === t.id ? 'bg-emerald-500 text-white' : 'text-slate-500'}">
+          ${t.label}
+        </button>
+      `).join('')}
+    </div>
+
+    <div id="client-detail-outlet"></div>
+  `;
+
+  document.getElementById('back-to-roster').addEventListener('click', () => { coachView = 'roster'; selectedClientId = null; renderActiveCoachView(); });
+  document.querySelectorAll('[data-client-detail-tab]').forEach(btn => {
+    btn.addEventListener('click', () => { clientDetailView = btn.dataset.clientDetailTab; renderClientDetailSection(clientId); });
+  });
+
+  renderClientDetailActiveTab(clientDetailData);
+}
+
+function renderClientDetailActiveTab(d) {
+  const outlet = document.getElementById('client-detail-outlet');
+  if (clientDetailView === 'overview') outlet.innerHTML = renderClientDetailOverview(d);
+  else if (clientDetailView === 'plan') outlet.innerHTML = renderClientDetailPlan(d);
+  else if (clientDetailView === 'progress') outlet.innerHTML = renderClientDetailProgress(d);
+  attachClientDetailHandlers(d);
+}
+
+function renderClientDetailOverview(d) {
+  const { client, workouts, otherClients, clientId } = d;
+  const restDays = client.rest_days || [];
+  return `
     <section class="mb-8">
       <h2 class="font-display text-lg font-semibold text-slate-900 mb-4">Edit client</h2>
       <form id="edit-client-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
@@ -2585,11 +2660,12 @@ async function renderClientDetailSection(clientId) {
         </div>
       </details>
     </section>
+  `;
+}
 
-    <section class="mb-8">
-      ${renderBadgesSection(badges)}
-    </section>
-
+function renderClientDetailPlan(d) {
+  const { workouts, otherClients, loggedExercises, clientSetLogs } = d;
+  return `
     <section class="mb-8">
       <div class="flex items-center justify-between gap-2 mb-4">
         <h2 class="font-display text-lg font-semibold text-slate-900">Assigned workouts</h2>
@@ -2612,10 +2688,31 @@ async function renderClientDetailSection(clientId) {
     </section>
 
     ${loggedExercises.length ? `
-    <section class="mb-8">
+    <section>
       <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Their lifts</h2>
       <p class="text-sm text-slate-500 mb-4">Actual weight logged per set, so you can gauge progression.</p>
       ${renderLiftProgressionPicker(loggedExercises, clientSetLogs)}
+    </section>
+    ` : ''}
+  `;
+}
+
+function renderClientDetailProgress(d) {
+  const { badges, photos, bodyComp, logs } = d;
+  return `
+    <section class="mb-8">
+      ${renderBadgesSection(badges)}
+    </section>
+
+    ${bodyComp.length ? `
+    <section class="mb-8">
+      <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Body composition</h2>
+      <p class="text-sm text-slate-500 mb-4">Self-reported by the client from their scan reports.</p>
+      <div class="flex flex-col gap-3">
+        ${renderBodyCompSummaryCard(bodyComp)}
+        ${renderBodyCompTrends(bodyComp)}
+      </div>
+      ${renderBodyCompHistory(bodyComp)}
     </section>
     ` : ''}
 
@@ -2640,15 +2737,13 @@ async function renderClientDetailSection(clientId) {
       </div>
     </section>
   `;
+}
 
-  document.getElementById('back-to-roster').addEventListener('click', () => { coachView = 'roster'; selectedClientId = null; renderActiveCoachView(); });
-  document.getElementById('edit-client-form').addEventListener('submit', (e) => handleEditClient(e, clientId));
-  document.getElementById('export-history-btn').addEventListener('click', () => exportClientHistoryCSV(client, logs, clientSetLogs));
-  const duplicateBtn = document.getElementById('duplicate-plan-btn');
-  if (duplicateBtn) duplicateBtn.addEventListener('click', () => handleDuplicatePlan(workouts, document.getElementById('duplicate-plan-target').value));
-  const coachLiftPicker = document.getElementById('lift-picker');
-  if (coachLiftPicker) coachLiftPicker.addEventListener('change', () => renderLiftChart(coachLiftPicker.value, clientSetLogs));
-  if (loggedExercises.length) renderLiftChart(loggedExercises[0], clientSetLogs);
+function attachClientDetailHandlers(d) {
+  const { client, workouts, clientSetLogs, loggedExercises, logs, clientId } = d;
+
+  const editForm = document.getElementById('edit-client-form');
+  if (editForm) editForm.addEventListener('submit', (e) => handleEditClient(e, clientId));
   document.querySelectorAll('[data-rest-day]').forEach(cb => {
     cb.addEventListener('change', () => {
       const label = cb.closest('label');
@@ -2659,13 +2754,23 @@ async function renderClientDetailSection(clientId) {
       label.classList.toggle('text-slate-600', !cb.checked);
     });
   });
-  document.getElementById('delete-client-btn').addEventListener('click', () => handleDeleteClient(clientId));
+  const deleteBtn = document.getElementById('delete-client-btn');
+  if (deleteBtn) deleteBtn.addEventListener('click', () => handleDeleteClient(clientId));
+
+  const exportBtn = document.getElementById('export-history-btn');
+  if (exportBtn) exportBtn.addEventListener('click', () => exportClientHistoryCSV(client, logs, clientSetLogs));
+  const duplicateBtn = document.getElementById('duplicate-plan-btn');
+  if (duplicateBtn) duplicateBtn.addEventListener('click', () => handleDuplicatePlan(workouts, document.getElementById('duplicate-plan-target').value));
   document.querySelectorAll('[data-remove-workout]').forEach(btn => {
     btn.addEventListener('click', () => handleRemoveWorkout(btn.dataset.removeWorkout, clientId));
   });
   document.querySelectorAll('[data-reassign-workout]').forEach(sel => {
     sel.addEventListener('change', (e) => { if (e.target.value) handleReassignWorkout(sel.dataset.reassignWorkout, e.target.value, clientId); });
   });
+  const coachLiftPicker = document.getElementById('lift-picker');
+  if (coachLiftPicker) coachLiftPicker.addEventListener('change', () => renderLiftChart(coachLiftPicker.value, clientSetLogs));
+  if (coachLiftPicker && loggedExercises.length) renderLiftChart(loggedExercises[0], clientSetLogs);
+
   document.querySelectorAll('[data-save-feedback]').forEach(btn => {
     btn.addEventListener('click', () => handleSaveFeedback(btn.dataset.saveFeedback));
   });
@@ -2755,8 +2860,8 @@ async function handleDuplicatePlan(workouts, targetClientId) {
     const rows = workouts.map(w => ({
       client_id: targetClientId,
       exercise_name: w.exercise_name,
-      sets: w.sets,
-      target_reps: w.target_reps,
+      sets: w.sets || '1',
+      target_reps: w.target_reps || '—',
       target_weight: w.target_weight,
       video_url: w.video_url,
       day_label: w.day_label,
