@@ -30,7 +30,7 @@
 </script>
 <style>
   body { font-family: 'Inter', sans-serif; }
-  .font-display { font-family: 'Space Grotesk', sans-serif; }
+  .font-display { font-family: 'Space Grotesk', sans-serif; letter-spacing: -0.01em; }
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
   @keyframes fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
@@ -168,9 +168,9 @@ function renderAuth(errorMsg = '') {
         </div>
 
         <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-lg shadow-slate-200/60">
-          <div class="flex mb-6 bg-slate-100 rounded-xl p-1">
-            <button id="tab-login" class="flex-1 py-2 rounded-lg text-sm font-medium transition ${authMode === 'login' ? 'bg-emerald-500 text-white' : 'text-slate-500'}">Log in</button>
-            <button id="tab-signup" class="flex-1 py-2 rounded-lg text-sm font-medium transition ${authMode === 'signup' ? 'bg-emerald-500 text-white' : 'text-slate-500'}">Sign up</button>
+          <div class="flex mb-6 bg-slate-100 rounded-xl p-1.5">
+            <button id="tab-login" class="flex-1 py-2.5 rounded-lg text-sm font-medium transition ${authMode === 'login' ? 'bg-emerald-500 text-white' : 'text-slate-500'}">Log in</button>
+            <button id="tab-signup" class="flex-1 py-2.5 rounded-lg text-sm font-medium transition ${authMode === 'signup' ? 'bg-emerald-500 text-white' : 'text-slate-500'}">Sign up</button>
           </div>
 
           ${errorMsg ? `<div class="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">${errorMsg}</div>` : ''}
@@ -331,7 +331,7 @@ function renderShell() {
 
   return `
     <header class="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-slate-200">
-      <div class="flex items-center justify-between px-4 py-3 max-w-2xl mx-auto">
+      <div class="flex items-center justify-between px-4 py-3.5 max-w-2xl mx-auto">
         <div class="flex items-center gap-2">
           <span class="font-display font-semibold text-lg"><span class="text-emerald-500">Fit</span><span class="text-slate-900">Coach</span></span>
           ${roleBadge}
@@ -341,7 +341,34 @@ function renderShell() {
         </button>
       </div>
     </header>
-    <main class="flex-1 max-w-2xl mx-auto w-full px-4 py-6" id="dashboard-outlet"></main>
+    <main class="flex-1 max-w-2xl mx-auto w-full px-4 pt-5 pb-24" id="dashboard-outlet"></main>
+    <nav id="bottom-tabs" class="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-slate-200"></nav>
+  `;
+}
+
+/* ---------------- ICON SET ---------------- */
+const ICONS = {
+  home: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>',
+  dumbbell: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5l11 11M4 9l-2 2 4 4 2-2M20 15l2-2-4-4-2 2M9 4l2-2 4 4-2 2M15 20l-2 2-4-4 2-2"/></svg>',
+  trendingUp: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/></svg>',
+  user: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-7 8-7s8 3 8 7"/></svg>',
+  users: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><path d="M16 9a3 3 0 100-6"/><path d="M15 14.3c2.6.5 4.5 2.6 4.5 5.7"/></svg>',
+  calendar: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
+  chat: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 1 1-3.5-6.6"/><path d="M21 3v6h-6"/></svg>',
+  more: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>',
+  clipboard: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="12" height="17" rx="2"/><rect x="9" y="2.5" width="6" height="3" rx="1"/><path d="M9 11h6M9 15h6"/></svg>'
+};
+
+function renderTabBar(containerId, tabs, activeId, dataAttr) {
+  return `
+    <div id="${containerId}" class="flex max-w-2xl mx-auto">
+      ${tabs.map(t => `
+        <button data-${dataAttr}="${t.id}" class="flex-1 flex flex-col items-center gap-0.5 py-2.5 transition ${activeId === t.id ? 'text-emerald-600' : 'text-slate-400'}">
+          ${t.icon}
+          <span class="text-[10px] font-medium">${t.label}</span>
+        </button>
+      `).join('')}
+    </div>
   `;
 }
 
@@ -433,6 +460,16 @@ function computeBadges({ logsCount, streak, hasPR, completionsCount, hasMeasurem
   ];
 }
 
+const MUSCLE_GROUPS = ['Chest', 'Back', 'Shoulders', 'Arms', 'Legs', 'Core', 'Full Body', 'Cardio', 'Other'];
+function renderMuscleGroupSelect(id, selected = '') {
+  return `
+    <select id="${id}" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500">
+      <option value="">Muscle group (optional)</option>
+      ${MUSCLE_GROUPS.map(g => `<option value="${g}" ${selected === g ? 'selected' : ''}>${g}</option>`).join('')}
+    </select>
+  `;
+}
+
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const SET_TYPE_LABELS = { warmup: 'Warmup', normal: 'Normal', drop: 'Drop', failure: 'Failure' };
 
@@ -487,14 +524,15 @@ async function renderClientDashboardStub() {
   outlet.innerHTML = renderLoading();
   const todayStr = toDateStr(new Date());
 
-  const [workoutsRes, logsRes, completionsRes, photosRes, setLogsRes, coachRes, bodyCompRes] = await Promise.all([
+  const [workoutsRes, logsRes, completionsRes, photosRes, setLogsRes, coachRes, bodyCompRes, sessionsRes] = await Promise.all([
     sb.from('workouts').select('*').eq('client_id', currentUser.id).order('created_at', { ascending: false }),
     sb.from('progress_logs').select('*').eq('client_id', currentUser.id).order('logged_at', { ascending: false }).limit(60),
     sb.from('workout_completions').select('*').eq('client_id', currentUser.id).order('completed_date', { ascending: false }).limit(120),
     sb.from('progress_photos').select('*').eq('client_id', currentUser.id).order('taken_at', { ascending: false }).limit(12),
     sb.from('workout_set_logs').select('*').eq('client_id', currentUser.id).order('logged_date', { ascending: false }).limit(500),
     currentProfile.coach_id ? sb.from('profiles').select('name,email,phone').eq('id', currentProfile.coach_id).single() : Promise.resolve({ data: null }),
-    sb.from('body_composition_logs').select('*').eq('client_id', currentUser.id).order('report_date', { ascending: false }).limit(30)
+    sb.from('body_composition_logs').select('*').eq('client_id', currentUser.id).order('report_date', { ascending: false }).limit(30),
+    sb.from('workout_sessions').select('*').eq('client_id', currentUser.id).order('session_date', { ascending: false }).limit(30)
   ]);
 
   if (workoutsRes.error) {
@@ -510,6 +548,8 @@ async function renderClientDashboardStub() {
   cachedSetLogs = setLogsRes.data || [];
   const coach = coachRes.data || null;
   const bodyComp = bodyCompRes.data || [];
+  const sessions = sessionsRes.data || [];
+  const todaySession = sessions.find(s => s.session_date === todayStr) || null;
   const restDays = currentProfile.rest_days || [];
 
   const streakDates = [...new Set([
@@ -517,43 +557,34 @@ async function renderClientDashboardStub() {
     ...completions.map(c => c.completed_date)
   ])];
 
-  clientData = { workouts, logs, completions, photos, coach, bodyComp, restDays, streakDates, todayStr };
+  clientData = { workouts, logs, completions, photos, coach, bodyComp, sessions, todaySession, restDays, streakDates, todayStr };
 
   outlet.innerHTML = `
-    <div class="animate-fade-in flex flex-col gap-6 pb-24">
-      ${renderClientTabsBar()}
-      <div id="client-view-outlet"></div>
-    </div>
+    <div class="animate-fade-in" id="client-view-outlet"></div>
   `;
+  document.getElementById('bottom-tabs').innerHTML = renderClientTabsBar();
   attachClientTabHandlers();
   renderActiveClientView();
 }
 
 function renderClientTabsBar() {
   const tabs = [
-    { id: 'home', label: 'Home' },
-    { id: 'workouts', label: 'Workouts' },
-    { id: 'progress', label: 'Progress' },
-    { id: 'profile', label: 'Profile' }
+    { id: 'home', label: 'Home', icon: ICONS.home },
+    { id: 'workouts', label: 'Workouts', icon: ICONS.dumbbell },
+    { id: 'progress', label: 'Progress', icon: ICONS.trendingUp },
+    { id: 'profile', label: 'Profile', icon: ICONS.user }
   ];
-  return `
-    <div class="flex bg-slate-100 rounded-xl p-1">
-      ${tabs.map(t => `
-        <button data-client-tab="${t.id}" class="flex-1 py-2 rounded-lg text-sm font-medium transition ${clientView === t.id ? 'bg-emerald-500 text-white' : 'text-slate-500'}">
-          ${t.label}
-        </button>
-      `).join('')}
-    </div>
-  `;
+  return renderTabBar('client-tabs-inner', tabs, clientView, 'client-tab');
 }
 
 function attachClientTabHandlers() {
   document.querySelectorAll('[data-client-tab]').forEach(btn => {
     btn.addEventListener('click', () => {
       clientView = btn.dataset.clientTab;
-      document.getElementById('dashboard-outlet').querySelector('.flex.bg-slate-100').outerHTML = renderClientTabsBar();
+      document.getElementById('bottom-tabs').innerHTML = renderClientTabsBar();
       attachClientTabHandlers();
       renderActiveClientView();
+      document.getElementById('dashboard-outlet').scrollIntoView({ block: 'start' });
     });
   });
 }
@@ -569,22 +600,58 @@ function renderActiveClientView() {
 
 /* ---------------- HOME ---------------- */
 function renderClientHomeTab() {
-  const { logs, completions, streakDates, restDays } = clientData;
+  const { logs, completions, streakDates, restDays, workouts, todayStr } = clientData;
   const streak = computeStreak(streakDates, restDays);
   const adherence = computeAdherence(streakDates, restDays, 7);
   const isRestDayToday = restDays.includes(new Date().getDay());
   const weightPoints = logs.filter(l => l.weight !== null && l.weight !== undefined).slice().reverse();
   const feedbackLogs = logs.filter(l => l.coach_feedback).slice(0, 1);
+  const firstName = (currentProfile.name || currentUser.email).split(' ')[0];
+  const initial = firstName.charAt(0).toUpperCase();
+
+  const todayDow = new Date().getDay();
+  const todaysWorkouts = workouts.filter(w => !w.days_of_week || !w.days_of_week.length || w.days_of_week.includes(todayDow));
+  const todayDoneIds = new Set(completions.filter(c => c.completed_date === todayStr).map(c => c.workout_id));
+
+  const todaysLogs = logs.filter(l => toDateStr(new Date(l.logged_at)) === todayStr);
+  const todaySteps = todaysLogs.reduce((max, l) => l.steps !== null && l.steps > max ? l.steps : max, 0);
+  const todayWater = todaysLogs.reduce((sum, l) => sum + (l.water_liters ? parseFloat(l.water_liters) : 0), 0);
+  const stepsGoal = currentProfile.steps_goal || 8000;
+  const waterGoal = currentProfile.water_goal_liters || 2.5;
+
+  const latestWeight = weightPoints.length ? weightPoints[weightPoints.length - 1].weight : null;
+  const daysAsClient = Math.max(0, Math.floor((Date.now() - new Date(currentProfile.created_at || Date.now()).getTime()) / 86400000));
+  const weeksAsClient = Math.max(1, Math.round(daysAsClient / 7));
 
   return `
     <div class="flex flex-col gap-6">
-      <div>
-        <h1 class="font-display text-xl font-semibold text-slate-900">Hi, ${escapeHtml((currentProfile.name || currentUser.email).split(' ')[0])} 👋</h1>
-        <div class="flex items-center gap-2 mt-2 flex-wrap">
-          ${streak > 0 ? `<span class="flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-1">🔥 ${streak} day streak</span>` : ''}
-          <span class="flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2.5 py-1">${adherence.completed}/${adherence.expected} this week</span>
-          ${isRestDayToday ? `<span class="flex items-center gap-1 text-xs font-medium text-slate-600 bg-slate-100 border border-slate-200 rounded-full px-2.5 py-1">🌙 Rest day</span>` : ''}
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="font-display text-xl font-semibold text-slate-900">Good day, ${escapeHtml(firstName)} 👋</h1>
+          <p class="text-sm text-slate-500 mt-0.5">Client · FitCoach</p>
         </div>
+        <div class="w-11 h-11 rounded-full bg-emerald-500 text-white flex items-center justify-center font-display font-semibold text-lg shrink-0">${escapeHtml(initial)}</div>
+      </div>
+
+      <div class="flex items-center gap-2 flex-wrap">
+        ${streak > 0 ? `<span class="flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1.5">🔥 ${streak} day streak</span>` : ''}
+        <span class="flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1.5">${adherence.completed}/${adherence.expected} this week</span>
+        ${isRestDayToday ? `<span class="flex items-center gap-1 text-xs font-medium text-slate-600 bg-slate-100 border border-slate-200 rounded-full px-3 py-1.5">🌙 Rest day</span>` : ''}
+      </div>
+
+      ${renderGoalCard(currentProfile, latestWeight, weeksAsClient)}
+
+      <div>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-display text-lg font-semibold text-slate-900">Today's plan</h2>
+          <button data-goto-tab="workouts" class="text-xs font-medium text-emerald-700">View all</button>
+        </div>
+        ${renderTodaysPlanPreview(todaysWorkouts, todayDoneIds, isRestDayToday)}
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        ${renderActivityBar('👟', 'Daily Steps', todaySteps, stepsGoal, '')}
+        ${renderActivityBar('💧', 'Water Intake', todayWater, waterGoal, 'L')}
       </div>
 
       ${renderWeightDashboardCard(weightPoints)}
@@ -620,10 +687,75 @@ function renderClientHomeTab() {
   `;
 }
 
+function renderGoalCard(profile, latestWeight, weeksAsClient) {
+  const goalLabel = profile.goal_label || 'General Fitness';
+  const target = profile.target_weight_kg;
+  return `
+    <div class="rounded-2xl p-5 text-white" style="background: linear-gradient(135deg, #059669, #10b981);">
+      <p class="text-xs uppercase tracking-wide opacity-80">Your Goal</p>
+      <h3 class="font-display text-xl font-semibold mt-1">${escapeHtml(goalLabel)}</h3>
+      <div class="grid grid-cols-3 gap-2 mt-4">
+        <div class="bg-white/15 rounded-xl p-3 text-center">
+          <p class="text-lg font-semibold">${latestWeight !== null ? latestWeight : '—'}</p>
+          <p class="text-[10px] opacity-80 mt-0.5">Current (kg)</p>
+        </div>
+        <div class="bg-white/15 rounded-xl p-3 text-center">
+          <p class="text-lg font-semibold">${target || '—'}</p>
+          <p class="text-[10px] opacity-80 mt-0.5">Goal (kg)</p>
+        </div>
+        <div class="bg-white/15 rounded-xl p-3 text-center">
+          <p class="text-lg font-semibold">${weeksAsClient}</p>
+          <p class="text-[10px] opacity-80 mt-0.5">Weeks active</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderTodaysPlanPreview(todaysWorkouts, todayDoneIds, isRestDayToday) {
+  if (isRestDayToday) {
+    return `<div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm text-center text-sm text-slate-500">🌙 Rest day — no workouts scheduled.</div>`;
+  }
+  if (!todaysWorkouts.length) {
+    return `<div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm text-center text-sm text-slate-400">No workouts assigned yet.</div>`;
+  }
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl shadow-sm divide-y divide-slate-100">
+      ${todaysWorkouts.slice(0, 4).map(w => `
+        <div class="flex items-center gap-3 p-3.5">
+          <div class="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">${ICONS.dumbbell}</div>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium text-slate-900 truncate">${escapeHtml(w.exercise_name)}</p>
+            <p class="text-xs text-slate-500">${w.sets} sets · ${escapeHtml(w.target_reps)}</p>
+          </div>
+          ${todayDoneIds.has(w.id) ? `<span class="text-xs font-medium text-emerald-600 shrink-0">Done ✓</span>` : ''}
+        </div>
+      `).join('')}
+      ${todaysWorkouts.length > 4 ? `<div class="p-3 text-center text-xs text-slate-400">+${todaysWorkouts.length - 4} more</div>` : ''}
+    </div>
+  `;
+}
+
+function renderActivityBar(emoji, label, current, goal, unit) {
+  const pct = goal > 0 ? Math.min(100, Math.round((current / goal) * 100)) : 0;
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-base">${emoji}</span>
+        <p class="text-xs font-medium text-slate-500">${label}</p>
+      </div>
+      <p class="text-sm font-semibold text-slate-900 mb-2">${current % 1 === 0 ? current : current.toFixed(1)}${unit} <span class="text-xs font-normal text-slate-400">/ ${goal}${unit}</span></p>
+      <div class="w-full bg-slate-100 rounded-full h-2">
+        <div class="bg-emerald-500 h-2 rounded-full" style="width:${pct}%"></div>
+      </div>
+    </div>
+  `;
+}
+
 function renderWeightDashboardCard(weightPoints) {
   if (!weightPoints.length) {
     return `
-      <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm text-center py-8">
+      <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm text-center py-8">
         <p class="text-sm text-slate-500">No weight logged yet.</p>
         <p class="text-xs text-slate-400 mt-1">Log your weight below to start your trend.</p>
       </div>
@@ -636,7 +768,7 @@ function renderWeightDashboardCard(weightPoints) {
   const deltaText = delta === null ? '' : delta === 0 ? 'No change' : `${delta > 0 ? '+' : ''}${delta}kg since last log`;
 
   return `
-    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
       <div class="flex items-end justify-between mb-2">
         <div>
           <p class="text-xs text-slate-500">Current weight</p>
@@ -669,7 +801,7 @@ function renderWeightDashboardCard(weightPoints) {
 
 /* ---------------- WORKOUTS ---------------- */
 function renderClientWorkoutsTab() {
-  const { workouts, completions, restDays, todayStr } = clientData;
+  const { workouts, completions, restDays, todayStr, todaySession } = clientData;
   const isRestDayToday = restDays.includes(new Date().getDay());
   const todayDow = new Date().getDay();
   const todaysWorkouts = workouts.filter(w => !w.days_of_week || !w.days_of_week.length || w.days_of_week.includes(todayDow));
@@ -680,6 +812,9 @@ function renderClientWorkoutsTab() {
     (todaySetLogsByWorkout[s.workout_id] = todaySetLogsByWorkout[s.workout_id] || []).push(s);
   });
   const loggedExercises = [...new Set(cachedSetLogs.filter(s => s.weight).map(s => s.exercise_name))].sort();
+  const todoWorkouts = todaysWorkouts.filter(w => !todayDoneIds.has(w.id));
+  const doneWorkouts = todaysWorkouts.filter(w => todayDoneIds.has(w.id));
+  const todaySetsLogged = cachedSetLogs.filter(s => s.logged_date === todayStr).length;
 
   return `
     <div class="flex flex-col gap-6">
@@ -692,25 +827,54 @@ function renderClientWorkoutsTab() {
             <p class="text-xs text-slate-500 mt-1">Recover well — your streak stays safe.</p>
           </div>
         ` : ''}
-        <div class="flex flex-col gap-3">
-          ${todaysWorkouts.length ? todaysWorkouts.map(w => renderWorkoutCard(w, todayDoneIds.has(w.id), todaySetLogsByWorkout[w.id] || [])).join('') : renderEmptyWorkouts()}
-        </div>
-      </div>
 
-      ${hasAnySchedule ? `
+        <div class="flex flex-col gap-3">
+          ${todoWorkouts.length ? todoWorkouts.map(w => renderWorkoutCard(w, false, todaySetLogsByWorkout[w.id] || [])).join('') : (todaysWorkouts.length ? '' : renderEmptyWorkouts())}
+        </div>
+
+        ${doneWorkouts.length && !(todaySession && todaySession.ended_at) ? `
+          <button id="finish-workout-btn" class="w-full mt-3 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-3 text-sm transition flex items-center justify-center gap-2">
+            <span id="finish-workout-label">🏁 Finish workout</span>
+          </button>
+        ` : ''}
+
+        ${doneWorkouts.length ? `
+          <div class="mt-6">
+            <p class="text-xs font-medium text-slate-500 mb-2">Done today (${doneWorkouts.length})</p>
+            <div class="flex flex-col gap-3">
+              ${doneWorkouts.map(w => renderWorkoutCard(w, true, todaySetLogsByWorkout[w.id] || [])).join('')}
+            </div>
+          </div>
+        ` : ''}
+      </div>
+      ${todaySession && todaySession.ended_at ? `
       <div>
-        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Weekly schedule</h2>
-        <p class="text-sm text-slate-500 mb-4">What's assigned across your week.</p>
-        ${renderWeeklySchedule(workouts, restDays)}
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Today's report</h2>
+        <p class="text-sm text-slate-500 mb-4">Saved once you finish a workout.</p>
+        ${renderSessionReportCard(todaySession)}
       </div>
       ` : ''}
 
+      ${hasAnySchedule ? `
+      <details class="group">
+        <summary class="flex items-center gap-1 cursor-pointer select-none list-none">
+          <span class="group-open:rotate-90 transition-transform inline-block text-emerald-700 text-xs">▸</span>
+          <h2 class="font-display text-lg font-semibold text-slate-900">Weekly schedule</h2>
+        </summary>
+        <p class="text-sm text-slate-500 mb-4 mt-1">What's assigned across your week.</p>
+        ${renderWeeklySchedule(workouts, restDays)}
+      </details>
+      ` : ''}
+
       ${loggedExercises.length ? `
-      <div>
-        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Your lifts</h2>
-        <p class="text-sm text-slate-500 mb-4">Progression by exercise, from your logged sets.</p>
+      <details class="group">
+        <summary class="flex items-center gap-1 cursor-pointer select-none list-none">
+          <span class="group-open:rotate-90 transition-transform inline-block text-emerald-700 text-xs">▸</span>
+          <h2 class="font-display text-lg font-semibold text-slate-900">Your lifts</h2>
+        </summary>
+        <p class="text-sm text-slate-500 mb-4 mt-1">Progression by exercise, from your logged sets.</p>
         ${renderLiftProgressionPicker(loggedExercises, cachedSetLogs)}
-      </div>
+      </details>
       ` : ''}
     </div>
   `;
@@ -718,7 +882,7 @@ function renderClientWorkoutsTab() {
 
 /* ---------------- PROGRESS ---------------- */
 function renderClientProgressTab() {
-  const { logs, completions, photos, streakDates, restDays } = clientData;
+  const { logs, completions, photos, streakDates, restDays, sessions } = clientData;
   const streak = computeStreak(streakDates, restDays);
   const adherence = computeAdherence(streakDates, restDays, 7);
   const sinceJoined = computeSinceJoined(logs, cachedSetLogs);
@@ -733,9 +897,18 @@ function renderClientProgressTab() {
   const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 6);
   const setsThisWeek = cachedSetLogs.filter(s => s.logged_date >= toDateStr(weekAgo)).length;
   const feedbackLogs = logs.filter(l => l.coach_feedback).slice(0, 5);
+  const finishedSessions = sessions.filter(s => s.ended_at);
 
   return `
     <div class="flex flex-col gap-8">
+      ${finishedSessions.length ? `
+      <div>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Workout sessions</h2>
+        <p class="text-sm text-slate-500 mb-4">Volume and time per completed session.</p>
+        ${renderSessionHistoryList(finishedSessions)}
+      </div>
+      ` : ''}
+
       <div>
         <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Trends</h2>
         <p class="text-sm text-slate-500 mb-4">How things are moving overall.</p>
@@ -773,10 +946,9 @@ function renderClientProgressTab() {
 
       <div>
         <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Progress photos</h2>
-        <p class="text-sm text-slate-500 mb-4">Optional — snap your progress over time.</p>
-        ${renderPhotoUploadForm()}
+        <p class="text-sm text-slate-500 mb-4">${photos.length ? 'Add new photos from the Home tab, with your daily log.' : 'Add a photo from the Home tab, alongside your daily log.'}</p>
         ${photos.length ? `
-          <div class="grid grid-cols-3 gap-2 mt-4">
+          <div class="grid grid-cols-3 gap-2">
             ${photos.map(renderPhotoThumb).join('')}
           </div>
         ` : ''}
@@ -797,13 +969,83 @@ function renderClientProgressTab() {
 }
 
 /* ---------------- PROFILE ---------------- */
+function computeLifetimeStats(setLogs, completions) {
+  const totalVolume = setLogs.reduce((sum, s) => sum + (s.weight && s.reps ? parseFloat(s.weight) * s.reps : 0), 0);
+  return { totalVolume, totalSets: setLogs.length, totalWorkoutsCompleted: completions.length };
+}
+
+function computeMuscleBreakdown(setLogs) {
+  const byGroup = {};
+  setLogs.forEach(s => {
+    const g = s.muscle_group || 'Other';
+    byGroup[g] = (byGroup[g] || 0) + 1;
+  });
+  const total = setLogs.length;
+  return Object.entries(byGroup)
+    .map(([group, count]) => ({ group, count, pct: total ? Math.round((count / total) * 100) : 0 }))
+    .sort((a, b) => b.count - a.count);
+}
+
+function renderLifetimeStatsCard(stats) {
+  return `
+    <div class="grid grid-cols-3 gap-2">
+      <div class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-sm">
+        <p class="text-xl font-semibold text-slate-900">${stats.totalWorkoutsCompleted}</p>
+        <p class="text-[11px] text-slate-500 mt-0.5">Workouts done</p>
+      </div>
+      <div class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-sm">
+        <p class="text-xl font-semibold text-slate-900">${stats.totalSets}</p>
+        <p class="text-[11px] text-slate-500 mt-0.5">Sets logged</p>
+      </div>
+      <div class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-sm">
+        <p class="text-xl font-semibold text-slate-900">${Math.round(stats.totalVolume).toLocaleString()}</p>
+        <p class="text-[11px] text-slate-500 mt-0.5">kg lifted</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderMuscleBreakdownCard(breakdown) {
+  if (!breakdown.length) {
+    return `<div class="text-center py-8 border border-dashed border-slate-300 rounded-2xl text-sm text-slate-400">Log sets with a muscle group tag to see your breakdown.</div>`;
+  }
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-3">
+      ${breakdown.map(b => `
+        <div>
+          <div class="flex items-center justify-between text-xs mb-1">
+            <span class="text-slate-700 font-medium">${escapeHtml(b.group)}</span>
+            <span class="text-slate-500">${b.pct}%</span>
+          </div>
+          <div class="w-full bg-slate-100 rounded-full h-2">
+            <div class="bg-emerald-500 h-2 rounded-full" style="width:${b.pct}%"></div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
 function renderClientProfileTab() {
-  const { coach, restDays } = clientData;
+  const { coach, restDays, completions } = clientData;
+  const lifetimeStats = computeLifetimeStats(cachedSetLogs, completions);
+  const muscleBreakdown = computeMuscleBreakdown(cachedSetLogs);
   return `
     <div class="flex flex-col gap-6">
       <div>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-4">Your stats</h2>
+        <div class="flex flex-col gap-3">
+          ${renderLifetimeStatsCard(lifetimeStats)}
+          <div>
+            <p class="text-xs font-medium text-slate-500 mb-2">Muscle focus (by sets logged)</p>
+            ${renderMuscleBreakdownCard(muscleBreakdown)}
+          </div>
+        </div>
+      </div>
+
+      <div>
         <h2 class="font-display text-lg font-semibold text-slate-900 mb-4">Your info</h2>
-        <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-3">
+        <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-3">
           <div>
             <p class="text-xs text-slate-500">Name</p>
             <p class="text-sm text-slate-900">${escapeHtml(currentProfile.name || '—')}</p>
@@ -828,7 +1070,7 @@ function renderClientProfileTab() {
       ${coach ? `
       <div>
         <h2 class="font-display text-lg font-semibold text-slate-900 mb-4">Your coach</h2>
-        <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-center justify-between gap-3">
+        <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex items-center justify-between gap-3">
           <div>
             <p class="text-sm font-medium text-slate-900">${escapeHtml(coach.name || coach.email)}</p>
             <p class="text-xs text-slate-500 mt-0.5">${escapeHtml(coach.email)}</p>
@@ -846,7 +1088,7 @@ function renderClientProfileTab() {
 
       <div>
         <h2 class="font-display text-lg font-semibold text-slate-900 mb-4">Update your info</h2>
-        <form id="profile-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
+        <form id="profile-form" class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
           <div>
             <label class="text-xs text-slate-500 mb-1 block">Name</label>
             <input type="text" id="profile-name" value="${escapeAttr(currentProfile.name || '')}"
@@ -896,12 +1138,12 @@ function attachActiveClientViewHandlers() {
   if (logForm) logForm.addEventListener('submit', handleLogSubmit);
   const downloadRecapBtn = document.getElementById('download-recap-btn');
   if (downloadRecapBtn) downloadRecapBtn.addEventListener('click', handleDownloadRecap);
-  const photoForm = document.getElementById('photo-form');
-  if (photoForm) photoForm.addEventListener('submit', handlePhotoUpload);
   const photoCameraInput = document.getElementById('photo-file-camera');
   if (photoCameraInput) photoCameraInput.addEventListener('change', handlePhotoFileSelect);
   const photoGalleryInput = document.getElementById('photo-file-gallery');
   if (photoGalleryInput) photoGalleryInput.addEventListener('change', handlePhotoFileSelect);
+  const photoClearBtn = document.getElementById('photo-preview-clear');
+  if (photoClearBtn) photoClearBtn.addEventListener('click', handlePhotoFileClear);
   const bodyCompForm = document.getElementById('bodycomp-form');
   if (bodyCompForm) bodyCompForm.addEventListener('submit', handleSaveBodyComp);
   const profileForm = document.getElementById('profile-form');
@@ -909,7 +1151,7 @@ function attachActiveClientViewHandlers() {
   document.querySelectorAll('[data-goto-tab]').forEach(btn => {
     btn.addEventListener('click', () => {
       clientView = btn.dataset.gotoTab;
-      document.getElementById('dashboard-outlet').querySelector('.flex.bg-slate-100').outerHTML = renderClientTabsBar();
+      document.getElementById('bottom-tabs').innerHTML = renderClientTabsBar();
       attachClientTabHandlers();
       renderActiveClientView();
     });
@@ -932,6 +1174,8 @@ function attachActiveClientViewHandlers() {
   document.querySelectorAll('[data-start-rest]').forEach(btn => {
     btn.addEventListener('click', () => startRestTimer(btn.dataset.startRest));
   });
+  const finishWorkoutBtn = document.getElementById('finish-workout-btn');
+  if (finishWorkoutBtn) finishWorkoutBtn.addEventListener('click', handleFinishWorkout);
   const liftPicker = document.getElementById('lift-picker');
   if (liftPicker) liftPicker.addEventListener('change', () => renderLiftChart(liftPicker.value, cachedSetLogs));
   const loggedExercises = [...new Set(cachedSetLogs.filter(s => s.weight).map(s => s.exercise_name))].sort();
@@ -1004,7 +1248,7 @@ function renderClientHistoryRow(log) {
     log.arms_cm ? `Arms ${log.arms_cm}cm` : null
   ].filter(Boolean).join(' · ');
   return `
-    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-1">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-1">
       <div class="flex items-center justify-between">
         <p class="text-xs text-slate-500">${escapeHtml(date)}</p>
         ${metrics ? `<p class="text-xs font-medium text-slate-700">${escapeHtml(metrics)}</p>` : ''}
@@ -1017,32 +1261,6 @@ function renderClientHistoryRow(log) {
 
 let selectedPhotoFile = null;
 
-function renderPhotoUploadForm() {
-  return `
-    <form id="photo-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-3">
-      <div class="flex gap-2">
-        <label class="flex-1 flex items-center justify-center gap-1.5 text-sm font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg py-2.5 cursor-pointer hover:bg-emerald-100 transition">
-          📸 Take photo
-          <input type="file" accept="image/*" capture="environment" id="photo-file-camera" class="hidden" />
-        </label>
-        <label class="flex-1 flex items-center justify-center gap-1.5 text-sm font-medium text-slate-600 bg-slate-50 border border-slate-300 rounded-lg py-2.5 cursor-pointer hover:bg-slate-100 transition">
-          🖼️ Gallery
-          <input type="file" accept="image/*" id="photo-file-gallery" class="hidden" />
-        </label>
-      </div>
-      <div id="photo-preview-wrap" class="hidden flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg p-2">
-        <img id="photo-preview-img" class="w-12 h-12 rounded-lg object-cover" />
-        <p id="photo-preview-name" class="text-xs text-slate-600 truncate flex-1"></p>
-      </div>
-      <input type="text" id="photo-note" placeholder="Optional note, e.g. Week 4"
-        class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
-      <button type="submit" id="photo-submit"
-        class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-2.5 text-sm transition flex items-center justify-center gap-2">
-        <span id="photo-submit-label">Upload photo</span>
-      </button>
-    </form>
-  `;
-}
 
 function handlePhotoFileSelect(e) {
   const file = e.target.files[0];
@@ -1054,6 +1272,16 @@ function handlePhotoFileSelect(e) {
   img.src = URL.createObjectURL(file);
   name.textContent = file.name;
   wrap.classList.remove('hidden');
+}
+
+function handlePhotoFileClear() {
+  selectedPhotoFile = null;
+  const wrap = document.getElementById('photo-preview-wrap');
+  if (wrap) wrap.classList.add('hidden');
+  const cameraInput = document.getElementById('photo-file-camera');
+  const galleryInput = document.getElementById('photo-file-gallery');
+  if (cameraInput) cameraInput.value = '';
+  if (galleryInput) galleryInput.value = '';
 }
 
 function renderPhotoThumb(p) {
@@ -1071,7 +1299,7 @@ function renderPhotoCompareSection(photos) {
   const newest = photos[0];
   const options = photos.map(p => `<option value="${escapeAttr(p.id)}">${escapeHtml(new Date(p.taken_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))}${p.note ? ` — ${escapeHtml(p.note)}` : ''}</option>`).join('');
   return `
-    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm mt-4">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm mt-4">
       <p class="text-xs text-slate-500 mb-3">Drag the slider to compare two photos.</p>
       <div class="flex gap-2 mb-3">
         <select id="compare-before-select" class="flex-1 text-xs bg-slate-50 border border-slate-300 rounded-lg px-2 py-2 text-slate-600">
@@ -1123,59 +1351,46 @@ function initPhotoCompareSlider(photos) {
   });
 }
 
-async function handlePhotoUpload(e) {
-  e.preventDefault();
-  const file = selectedPhotoFile;
-  if (!file) { toast('Take or choose a photo first.', 'info'); return; }
-
-  const submitBtn = document.getElementById('photo-submit');
-  const label = document.getElementById('photo-submit-label');
-  submitBtn.disabled = true;
-  const originalLabel = label.textContent;
-  label.innerHTML = `<span class="spinner-light inline-block align-middle"></span>`;
-
+// Starts today's workout-session clock the first time the client does anything training-related.
+// No-op if a session row for today already exists (upsert with ignoreDuplicates).
+async function ensureTodaySessionStarted() {
   try {
-    const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-    const path = `${currentUser.id}/${Date.now()}-${safeName}`;
-    const { error: upErr } = await sb.storage.from('progress-photos').upload(path, file);
-    if (upErr) throw upErr;
-
-    const { data: urlData } = sb.storage.from('progress-photos').getPublicUrl(path);
-    const { error: insErr } = await sb.from('progress_photos').insert({
-      client_id: currentUser.id,
-      photo_url: urlData.publicUrl,
-      note: document.getElementById('photo-note').value.trim() || null
-    });
-    if (insErr) throw insErr;
-
-    toast('Photo uploaded.', 'success');
-    selectedPhotoFile = null;
-    await renderClientDashboardStub();
+    await sb.from('workout_sessions').upsert(
+      { client_id: currentUser.id, session_date: toDateStr(new Date()) },
+      { onConflict: 'client_id,session_date', ignoreDuplicates: true }
+    );
   } catch (err) {
-    console.error(err);
-    toast(err.message || 'Could not upload photo.', 'error');
-    submitBtn.disabled = false;
-    label.textContent = originalLabel;
+    console.error(err); // non-critical — don't block the user's action over this
   }
 }
 
 async function handleToggleComplete(workoutId, checked) {
+  const checkbox = document.querySelector(`[data-toggle-complete="${workoutId}"]`);
+  if (checkbox) checkbox.disabled = true;
   try {
+    const todayStr = toDateStr(new Date());
     if (checked) {
+      ensureTodaySessionStarted(); // fire-and-forget, don't block the checkbox on this
       const { error } = await sb.from('workout_completions').upsert(
-        { workout_id: workoutId, client_id: currentUser.id, completed_date: toDateStr(new Date()) },
+        { workout_id: workoutId, client_id: currentUser.id, completed_date: todayStr },
         { onConflict: 'workout_id,completed_date' }
       );
       if (error) throw error;
+      if (!clientData.completions.some(c => c.workout_id === workoutId && c.completed_date === todayStr)) {
+        clientData.completions.push({ workout_id: workoutId, client_id: currentUser.id, completed_date: todayStr });
+      }
     } else {
       const { error } = await sb.from('workout_completions').delete()
-        .eq('workout_id', workoutId).eq('completed_date', toDateStr(new Date()));
+        .eq('workout_id', workoutId).eq('completed_date', todayStr);
       if (error) throw error;
+      clientData.completions = clientData.completions.filter(c => !(c.workout_id === workoutId && c.completed_date === todayStr));
     }
-    await renderClientDashboardStub();
+    if (!clientData.streakDates.includes(todayStr)) clientData.streakDates.push(todayStr);
+    renderActiveClientView(); // re-render from the already-updated local cache — no network round trip
   } catch (err) {
     console.error(err);
-    toast(err.message || 'Could not update.', 'error');
+    toast(err.message || 'Could not update. Check your connection and try again.', 'error');
+    if (checkbox) { checkbox.checked = !checked; checkbox.disabled = false; }
   }
 }
 
@@ -1191,7 +1406,7 @@ function renderSinceJoinedCard(since) {
   }
   if (!parts.length) return '';
   return `
-    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
       <p class="text-xs text-slate-500 mb-1">Since you joined</p>
       <p class="text-sm text-slate-700">${parts.join(' · ')}</p>
     </div>
@@ -1234,7 +1449,7 @@ function renderBodyCompField(f) {
 
 function renderBodyCompForm() {
   return `
-    <form id="bodycomp-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
+    <form id="bodycomp-form" class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
       <p class="text-xs text-slate-500">Optional — add numbers from a body composition scan (like an InBody report) to track them over time.</p>
       <div>
         <label class="text-xs text-slate-500 mb-1 block">Report date</label>
@@ -1302,7 +1517,7 @@ function renderBodyCompSummaryCard(entries) {
     .join('');
   if (!chips) return '';
   return `
-    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
       <p class="text-xs text-slate-500 mb-3">Latest report — ${escapeHtml(new Date(latest.report_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }))}</p>
       <div class="grid grid-cols-3 gap-2">${chips}</div>
     </div>
@@ -1341,7 +1556,7 @@ function renderBodyCompHistory(entries) {
 
 function renderAdherenceTrendSection(dateStrs, restDays) {
   return `
-    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
       <div class="flex items-center justify-between mb-3">
         <p class="text-xs text-slate-500">Adherence trend</p>
         <select id="adherence-weeks-select" class="text-xs bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-slate-600">
@@ -1391,7 +1606,7 @@ function renderWeeklySchedule(workouts, restDays = []) {
       </div>
     `;
   }).join('');
-  return `<div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm divide-y divide-slate-100">${days}</div>`;
+  return `<div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm divide-y divide-slate-100">${days}</div>`;
 }
 
 // 'Sets' can now be alphanumeric (e.g. '3-4', 'AMRAP') — pull a usable row count for the
@@ -1402,6 +1617,95 @@ function parseSetsCount(setsValue) {
   return Number.isFinite(n) && n > 0 ? Math.min(n, 20) : 3;
 }
 
+function formatDuration(seconds) {
+  if (!seconds || seconds < 0) return '0 min';
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `${mins} min`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h ${mins % 60}m`;
+}
+
+function renderSessionHistoryList(sessions) {
+  return `
+    <div class="flex flex-col gap-2">
+      ${sessions.slice(0, 10).map(s => `
+        <div class="bg-white border border-slate-200 rounded-2xl p-3 shadow-sm flex items-center justify-between gap-3">
+          <p class="text-xs text-slate-500">${escapeHtml(new Date(s.session_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))}</p>
+          <p class="text-xs text-slate-700">${Math.round(s.total_volume_kg || 0)}kg · ${s.total_sets || 0} sets · ${formatDuration(s.duration_seconds)}</p>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderSessionReportCard(session) {
+  return `
+    <div class="rounded-2xl p-5 text-white mb-3" style="background: linear-gradient(135deg, #059669, #10b981);">
+      <p class="text-xs uppercase tracking-wide opacity-80">🏁 Workout complete</p>
+      <div class="grid grid-cols-3 gap-3 mt-3">
+        <div>
+          <p class="text-xl font-semibold">${Math.round(session.total_volume_kg || 0)}<span class="text-xs font-normal opacity-80"> kg</span></p>
+          <p class="text-[11px] opacity-80 mt-0.5">Volume lifted</p>
+        </div>
+        <div>
+          <p class="text-xl font-semibold">${session.total_sets || 0}</p>
+          <p class="text-[11px] opacity-80 mt-0.5">Sets logged</p>
+        </div>
+        <div>
+          <p class="text-xl font-semibold">${formatDuration(session.duration_seconds)}</p>
+          <p class="text-[11px] opacity-80 mt-0.5">Time taken</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function handleFinishWorkout() {
+  const btn = document.getElementById('finish-workout-btn');
+  const label = document.getElementById('finish-workout-label');
+  if (btn) { btn.disabled = true; label.innerHTML = `<span class="spinner-light inline-block align-middle"></span>`; }
+
+  try {
+    const todayStr = toDateStr(new Date());
+    const todaysSets = cachedSetLogs.filter(s => s.logged_date === todayStr);
+    const totalVolume = todaysSets.reduce((sum, s) => sum + (s.weight && s.reps ? parseFloat(s.weight) * s.reps : 0), 0);
+    const totalSets = todaysSets.length;
+    const startedAt = clientData.todaySession ? new Date(clientData.todaySession.started_at) : new Date();
+    const endedAt = new Date();
+    const durationSeconds = Math.max(0, Math.round((endedAt - startedAt) / 1000));
+
+    const { error } = await sb.from('workout_sessions').upsert({
+      client_id: currentUser.id,
+      session_date: todayStr,
+      started_at: startedAt.toISOString(),
+      ended_at: endedAt.toISOString(),
+      total_volume_kg: totalVolume,
+      total_sets: totalSets,
+      duration_seconds: durationSeconds
+    }, { onConflict: 'client_id,session_date' });
+    if (error) throw error;
+
+    const finishedSession = {
+      client_id: currentUser.id,
+      session_date: todayStr,
+      started_at: startedAt.toISOString(),
+      ended_at: endedAt.toISOString(),
+      total_volume_kg: totalVolume,
+      total_sets: totalSets,
+      duration_seconds: durationSeconds
+    };
+    clientData.todaySession = finishedSession;
+    clientData.sessions = [finishedSession, ...clientData.sessions.filter(s => s.session_date !== todayStr)];
+
+    toast('Workout complete! 💪', 'success');
+    renderActiveClientView();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not finish workout.', 'error');
+    if (btn) { btn.disabled = false; label.textContent = '🏁 Finish workout'; }
+  }
+}
+
 function renderWorkoutCard(w, isDone, todaySetLogs = []) {
   const setsById = {};
   todaySetLogs.forEach(s => { setsById[s.set_number] = s; });
@@ -1409,7 +1713,7 @@ function renderWorkoutCard(w, isDone, todaySetLogs = []) {
     const existing = setsById[setNum];
     return `
       <div class="grid grid-cols-[auto_1fr_1fr_1fr] gap-2 items-center">
-        <span class="text-xs text-slate-400 w-5">${setNum}</span>
+        <span class="text-xs text-slate-400 w-6 text-center">${setNum}</span>
         <input type="number" step="0.5" min="0" placeholder="kg" data-set-weight="${setNum}"
           value="${existing && existing.weight !== null ? existing.weight : ''}"
           class="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60" />
@@ -1424,7 +1728,7 @@ function renderWorkoutCard(w, isDone, todaySetLogs = []) {
   }).join('');
 
   return `
-    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
@@ -1447,13 +1751,13 @@ function renderWorkoutCard(w, isDone, todaySetLogs = []) {
         ` : ''}
       </div>
 
-      <div class="flex items-center justify-between gap-2 mt-3 pt-3 border-t border-slate-100">
-        <label class="flex items-center gap-2 text-sm cursor-pointer ${isDone ? 'text-emerald-700' : 'text-slate-500'}">
-          <input type="checkbox" data-toggle-complete="${w.id}" ${isDone ? 'checked' : ''} class="accent-emerald-500 w-4 h-4" />
-          ${isDone ? 'Done today ✓' : 'Mark done today'}
+      <div class="mt-3 pt-3 border-t border-slate-100">
+        <label class="flex items-center gap-3 cursor-pointer">
+          <input type="checkbox" data-toggle-complete="${w.id}" ${isDone ? 'checked' : ''} class="accent-emerald-500 w-5 h-5 shrink-0" />
+          <span class="text-sm font-medium ${isDone ? 'text-emerald-700' : 'text-slate-700'}">${isDone ? 'Done today ✓' : 'Mark done today'}</span>
         </label>
-        <button data-toggle-sets="${w.id}" class="text-xs font-medium text-emerald-700 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg px-2.5 py-1.5 transition">
-          ${todaySetLogs.length ? 'Edit sets' : 'Log sets'}
+        <button data-toggle-sets="${w.id}" class="mt-2 text-xs text-slate-400 hover:text-emerald-700 transition underline decoration-dotted underline-offset-2">
+          ${todaySetLogs.length ? `Edit logged sets (${todaySetLogs.length})` : '+ Log weight & reps (optional)'}
         </button>
       </div>
 
@@ -1462,7 +1766,7 @@ function renderWorkoutCard(w, isDone, todaySetLogs = []) {
           <span></span><span>Weight</span><span>Reps</span><span>Type</span>
         </div>
         ${rows}
-        <button data-save-sets="${w.id}" data-exercise-name="${escapeAttr(w.exercise_name)}"
+        <button data-save-sets="${w.id}" data-exercise-name="${escapeAttr(w.exercise_name)}" data-muscle-group="${escapeAttr(w.muscle_group || '')}"
           class="mt-1 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-2 text-xs transition flex items-center justify-center gap-2">
           <span id="save-sets-label-${w.id}">Save sets</span>
         </button>
@@ -1513,7 +1817,7 @@ function startRestTimer(workoutId) {
 
 function renderLiftProgressionPicker(exercises, setLogs) {
   return `
-    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
       <select id="lift-picker" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 mb-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/60">
         ${exercises.map(ex => `<option value="${escapeAttr(ex)}">${escapeHtml(ex)}</option>`).join('')}
       </select>
@@ -1554,6 +1858,7 @@ async function handleSaveSets(workoutId) {
   const label = document.getElementById(`save-sets-label-${workoutId}`);
   const btn = document.querySelector(`[data-save-sets="${workoutId}"]`);
   const exerciseName = btn.dataset.exerciseName;
+  const muscleGroup = btn.dataset.muscleGroup || null;
   const panel = document.getElementById(`sets-panel-${workoutId}`);
   const todayStr = toDateStr(new Date());
 
@@ -1580,23 +1885,32 @@ async function handleSaveSets(workoutId) {
 
   try {
     const priorMax = maxWeightForExercise(cachedSetLogs, exerciseName);
+    ensureTodaySessionStarted(); // fire-and-forget
 
     await sb.from('workout_set_logs').delete().eq('workout_id', workoutId).eq('logged_date', todayStr);
-    const { error } = await sb.from('workout_set_logs').insert(
-      rows.map(r => ({
-        workout_id: workoutId,
-        client_id: currentUser.id,
-        exercise_name: exerciseName,
-        logged_date: todayStr,
-        ...r
-      }))
-    );
+    const newEntries = rows.map(r => ({
+      workout_id: workoutId,
+      client_id: currentUser.id,
+      exercise_name: exerciseName,
+      muscle_group: muscleGroup,
+      logged_date: todayStr,
+      ...r
+    }));
+    const { data: inserted, error } = await sb.from('workout_set_logs').insert(newEntries).select();
     if (error) throw error;
 
     await sb.from('workout_completions').upsert(
       { workout_id: workoutId, client_id: currentUser.id, completed_date: todayStr },
       { onConflict: 'workout_id,completed_date' }
     );
+
+    // Update local caches so the UI reflects this instantly without a full refetch
+    cachedSetLogs = cachedSetLogs.filter(s => !(s.workout_id === workoutId && s.logged_date === todayStr));
+    cachedSetLogs.push(...(inserted && inserted.length ? inserted : newEntries));
+    if (!clientData.completions.some(c => c.workout_id === workoutId && c.completed_date === todayStr)) {
+      clientData.completions.push({ workout_id: workoutId, client_id: currentUser.id, completed_date: todayStr });
+    }
+    if (!clientData.streakDates.includes(todayStr)) clientData.streakDates.push(todayStr);
 
     const newMax = Math.max(...rows.filter(r => r.weight).map(r => r.weight), 0);
     if (newMax > 0 && (priorMax === null || newMax > priorMax)) {
@@ -1605,10 +1919,10 @@ async function handleSaveSets(workoutId) {
       toast('Sets saved.', 'success');
     }
 
-    await renderClientDashboardStub();
+    renderActiveClientView();
   } catch (err) {
     console.error(err);
-    toast(err.message || 'Could not save sets.', 'error');
+    toast(err.message || 'Could not save sets. Check your connection and try again.', 'error');
     btn.disabled = false;
     label.textContent = originalLabel;
   }
@@ -1625,16 +1939,21 @@ function renderEmptyWorkouts() {
 
 function renderLogForm() {
   return `
-    <form id="log-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
-      <div class="grid grid-cols-2 gap-3">
+    <form id="log-form" class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+      <div class="grid grid-cols-3 gap-3">
         <div>
           <label class="text-xs text-slate-500 mb-1 block">Weight (kg)</label>
-          <input type="number" step="0.1" min="0" id="log-weight" placeholder="e.g. 72.5"
+          <input type="number" step="0.1" min="0" id="log-weight" placeholder="72.5"
             class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
         </div>
         <div>
           <label class="text-xs text-slate-500 mb-1 block">Water (L)</label>
-          <input type="number" step="0.1" min="0" id="log-water" placeholder="e.g. 2.5"
+          <input type="number" step="0.1" min="0" id="log-water" placeholder="2.5"
+            class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">Steps</label>
+          <input type="number" step="1" min="0" id="log-steps" placeholder="8000"
             class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
         </div>
       </div>
@@ -1667,6 +1986,29 @@ function renderLogForm() {
         </div>
       </details>
 
+      <details class="group">
+        <summary class="text-xs font-medium text-emerald-700 cursor-pointer select-none list-none flex items-center gap-1">
+          <span class="group-open:rotate-90 transition-transform inline-block">▸</span> Add a progress photo (optional)
+        </summary>
+        <div class="flex flex-col gap-3 mt-3">
+          <div class="flex gap-2">
+            <label class="flex-1 flex items-center justify-center gap-1.5 text-sm font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg py-2.5 cursor-pointer hover:bg-emerald-100 transition">
+              📸 Take photo
+              <input type="file" accept="image/*" capture="environment" id="photo-file-camera" class="hidden" />
+            </label>
+            <label class="flex-1 flex items-center justify-center gap-1.5 text-sm font-medium text-slate-600 bg-slate-50 border border-slate-300 rounded-lg py-2.5 cursor-pointer hover:bg-slate-100 transition">
+              🖼️ Gallery
+              <input type="file" accept="image/*" id="photo-file-gallery" class="hidden" />
+            </label>
+          </div>
+          <div id="photo-preview-wrap" class="hidden flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg p-2">
+            <img id="photo-preview-img" class="w-12 h-12 rounded-lg object-cover" />
+            <p id="photo-preview-name" class="text-xs text-slate-600 truncate flex-1"></p>
+            <button type="button" id="photo-preview-clear" class="text-xs text-slate-400 hover:text-red-600 shrink-0">Remove</button>
+          </div>
+        </div>
+      </details>
+
       <div>
         <label class="text-xs text-slate-500 mb-1 block">PR / notes</label>
         <textarea id="log-notes" rows="2" placeholder="Hit a new deadlift PR today..."
@@ -1674,7 +2016,7 @@ function renderLogForm() {
       </div>
       <button type="submit" id="log-submit"
         class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-2.5 text-sm transition flex items-center justify-center gap-2">
-        <span id="log-submit-label">Save today's log</span>
+        <span id="log-submit-label">Save today's progress</span>
       </button>
     </form>
   `;
@@ -1684,13 +2026,14 @@ async function handleLogSubmit(e) {
   e.preventDefault();
   const weightVal = document.getElementById('log-weight').value;
   const waterVal = document.getElementById('log-water').value;
+  const stepsVal = document.getElementById('log-steps').value;
   const waistVal = document.getElementById('log-waist').value;
   const chestVal = document.getElementById('log-chest').value;
   const hipsVal = document.getElementById('log-hips').value;
   const armsVal = document.getElementById('log-arms').value;
   const notesVal = document.getElementById('log-notes').value.trim();
 
-  if (!weightVal && !waterVal && !waistVal && !chestVal && !hipsVal && !armsVal && !notesVal) {
+  if (!weightVal && !waterVal && !stepsVal && !waistVal && !chestVal && !hipsVal && !armsVal && !notesVal && !selectedPhotoFile) {
     toast('Add at least one thing before saving.', 'info');
     return;
   }
@@ -1706,6 +2049,7 @@ async function handleLogSubmit(e) {
       client_id: currentUser.id,
       weight: weightVal ? parseFloat(weightVal) : null,
       water_liters: waterVal ? parseFloat(waterVal) : null,
+      steps: stepsVal ? parseInt(stepsVal, 10) : null,
       waist_cm: waistVal ? parseFloat(waistVal) : null,
       chest_cm: chestVal ? parseFloat(chestVal) : null,
       hips_cm: hipsVal ? parseFloat(hipsVal) : null,
@@ -1714,11 +2058,27 @@ async function handleLogSubmit(e) {
     });
     if (error) throw error;
 
+    if (selectedPhotoFile) {
+      const file = selectedPhotoFile;
+      const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+      const path = `${currentUser.id}/${Date.now()}-${safeName}`;
+      const { error: upErr } = await sb.storage.from('progress-photos').upload(path, file);
+      if (upErr) throw upErr;
+      const { data: urlData } = sb.storage.from('progress-photos').getPublicUrl(path);
+      const { error: photoErr } = await sb.from('progress_photos').insert({
+        client_id: currentUser.id,
+        photo_url: urlData.publicUrl,
+        note: notesVal || null
+      });
+      if (photoErr) throw photoErr;
+      selectedPhotoFile = null;
+    }
+
     toast('Logged. Nice work today.', 'success');
     await renderClientDashboardStub();
   } catch (err) {
     console.error(err);
-    toast(err.message || 'Could not save your log.', 'error');
+    toast(err.message || 'Could not save your progress.', 'error');
   } finally {
     submitBtn.disabled = false;
     label.textContent = originalLabel;
@@ -1773,31 +2133,21 @@ async function renderCoachDashboardStub() {
   }
 
   outlet.innerHTML = `
-    <div class="animate-fade-in flex flex-col gap-6 pb-24">
-      ${renderCoachTabsBar()}
-      <div id="coach-view-outlet"></div>
-    </div>
+    <div class="animate-fade-in" id="coach-view-outlet"></div>
   `;
+  document.getElementById('bottom-tabs').innerHTML = renderCoachTabsBar();
   attachCoachTabHandlers();
   renderActiveCoachView();
 }
 
 function renderCoachTabsBar() {
   const tabs = [
-    { id: 'roster', label: 'Roster' },
-    { id: 'library', label: 'Library' },
-    { id: 'templates', label: 'Templates' }
+    { id: 'roster', label: 'Clients', icon: ICONS.users },
+    { id: 'library', label: 'Library', icon: ICONS.clipboard },
+    { id: 'templates', label: 'Templates', icon: ICONS.dumbbell }
   ];
-  return `
-    <div class="flex bg-slate-100 rounded-xl p-1">
-      ${tabs.map(t => `
-        <button data-coach-tab="${t.id}"
-          class="flex-1 py-2 rounded-lg text-sm font-medium transition ${coachView === t.id || (coachView === 'clientDetail' && t.id === 'roster') ? 'bg-emerald-500 text-white' : 'text-slate-500'}">
-          ${t.label}
-        </button>
-      `).join('')}
-    </div>
-  `;
+  const activeId = (coachView === 'clientDetail') ? 'roster' : coachView;
+  return renderTabBar('coach-tabs-inner', tabs, activeId, 'coach-tab');
 }
 
 function attachCoachTabHandlers() {
@@ -1805,9 +2155,10 @@ function attachCoachTabHandlers() {
     btn.addEventListener('click', () => {
       coachView = btn.dataset.coachTab;
       selectedClientId = null;
-      document.getElementById('dashboard-outlet').querySelector('.flex.bg-slate-100').outerHTML = renderCoachTabsBar();
+      document.getElementById('bottom-tabs').innerHTML = renderCoachTabsBar();
       attachCoachTabHandlers();
       renderActiveCoachView();
+      document.getElementById('dashboard-outlet').scrollIntoView({ block: 'start' });
     });
   });
 }
@@ -1897,7 +2248,7 @@ function renderRosterSection() {
     <section class="mt-8">
       <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Assign a template</h2>
       <p class="text-sm text-slate-500 mb-4">Load a full routine onto one or more clients at once.</p>
-      <form id="assign-template-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
+      <form id="assign-template-form" class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
         <div>
           <label class="text-xs text-slate-500 mb-2 block">Client(s)</label>
           <div class="flex flex-col gap-1.5 max-h-40 overflow-y-auto border border-slate-200 rounded-lg p-2">
@@ -2015,7 +2366,7 @@ function renderClientCard(c) {
   const displayName = c.name || c.email;
 
   return `
-    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-center justify-between gap-3">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex items-center justify-between gap-3">
       <button data-manage-client="${c.id}" class="min-w-0 text-left flex-1">
         <div class="flex items-center gap-2 flex-wrap">
           <h3 class="font-medium text-slate-900 text-sm truncate">${escapeHtml(displayName)}</h3>
@@ -2058,7 +2409,7 @@ function renderWorkoutBuilder() {
   const libraryOptions = exerciseLibrary.map(ex => `<option value="${escapeAttr(ex.id)}">${escapeHtml(ex.name)}</option>`).join('');
 
   return `
-    <form id="builder-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
+    <form id="builder-form" class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
       <div>
         <label class="text-xs text-slate-500 mb-1 block">Client</label>
         <select id="builder-client" required
@@ -2080,6 +2431,10 @@ function renderWorkoutBuilder() {
         <label class="text-xs text-slate-500 mb-1 block">Exercise name</label>
         <input required type="text" id="builder-exercise" placeholder="e.g. Barbell Squat"
           class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+      </div>
+      <div>
+        <label class="text-xs text-slate-500 mb-1 block">Muscle group</label>
+        ${renderMuscleGroupSelect('builder-muscle-group')}
       </div>
       <div class="grid grid-cols-3 gap-3">
         <div>
@@ -2150,6 +2505,7 @@ function handleLibraryAutofill(e) {
   document.getElementById('builder-weight').value = ex.default_weight || '';
   document.getElementById('builder-video').value = ex.video_url || '';
   document.getElementById('builder-instructions').value = ex.default_instructions || '';
+  document.getElementById('builder-muscle-group').value = ex.muscle_group || '';
 }
 
 async function handleAssignWorkout(e) {
@@ -2162,6 +2518,7 @@ async function handleAssignWorkout(e) {
   const videoUrl = document.getElementById('builder-video').value.trim();
   const dayLabel = document.getElementById('builder-day-label').value.trim();
   const instructions = document.getElementById('builder-instructions').value.trim();
+  const muscleGroup = document.getElementById('builder-muscle-group').value;
   const daysOfWeek = [...document.querySelectorAll('[data-builder-day]:checked')].map(cb => parseInt(cb.dataset.builderDay, 10));
 
   const submitBtn = document.getElementById('builder-submit');
@@ -2180,7 +2537,8 @@ async function handleAssignWorkout(e) {
       video_url: videoUrl || null,
       day_label: dayLabel || null,
       days_of_week: daysOfWeek,
-      instructions: instructions || null
+      instructions: instructions || null,
+      muscle_group: muscleGroup || null
     });
     if (error) throw error;
 
@@ -2262,11 +2620,15 @@ function renderLibrarySection() {
         `}
       </div>
 
-      <form id="library-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
+      <form id="library-form" class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
         <div>
           <label class="text-xs text-slate-500 mb-1 block">Exercise name</label>
           <input required type="text" id="lib-name" placeholder="e.g. Romanian Deadlift"
             class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">Muscle group</label>
+          ${renderMuscleGroupSelect('lib-muscle-group')}
         </div>
         <div class="grid grid-cols-3 gap-3">
           <div>
@@ -2306,7 +2668,7 @@ function renderLibrarySection() {
 function renderLibraryCard(ex) {
   const meta = [ex.default_sets ? `${ex.default_sets} sets` : null, ex.default_reps || null, ex.default_weight || null].filter(Boolean).join(' · ');
   return `
-    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-center justify-between gap-3">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex items-center justify-between gap-3">
       <div class="min-w-0">
         <h3 class="font-medium text-slate-900 text-sm truncate">${escapeHtml(ex.name)}</h3>
         ${meta ? `<p class="text-xs text-slate-500 mt-1">${escapeHtml(meta)}</p>` : ''}
@@ -2376,7 +2738,7 @@ function renderTemplatesSection() {
         `}
       </div>
 
-      <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
+      <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
         <h3 class="font-medium text-slate-900 text-sm">New template</h3>
 
         ${templateDraftItems.length ? `
@@ -2393,6 +2755,7 @@ function renderTemplatesSection() {
         <form id="template-add-row-form" class="flex flex-col gap-3 border-t border-slate-100 pt-4">
           <input required type="text" id="draft-exercise" placeholder="Exercise name"
             class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          ${renderMuscleGroupSelect('draft-muscle-group')}
           <div class="grid grid-cols-3 gap-3">
             <input required type="text" id="draft-sets" inputmode="text" placeholder="e.g. 4"
               class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
@@ -2439,7 +2802,7 @@ function renderTemplatesSection() {
 
 function renderTemplateCard(t) {
   return `
-    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
       <div class="flex items-center justify-between gap-3 mb-2">
         <h3 class="font-medium text-slate-900 text-sm truncate">${escapeHtml(t.name)}</h3>
         <button data-delete-template="${t.id}" class="shrink-0 text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:border-red-300 hover:text-red-600 transition">Delete</button>
@@ -2515,13 +2878,14 @@ async function renderClientDetailSection(clientId) {
   const client = coachClients.find(c => c.id === clientId);
   if (!client) { coachView = 'roster'; renderActiveCoachView(); return; }
 
-  const [workoutsRes, logsRes, completionsRes, photosRes, setLogsRes, bodyCompRes] = await Promise.all([
+  const [workoutsRes, logsRes, completionsRes, photosRes, setLogsRes, bodyCompRes, sessionsRes] = await Promise.all([
     sb.from('workouts').select('*').eq('client_id', clientId).order('created_at', { ascending: false }),
     sb.from('progress_logs').select('*').eq('client_id', clientId).order('logged_at', { ascending: false }).limit(20),
     sb.from('workout_completions').select('*').eq('client_id', clientId).order('completed_date', { ascending: false }).limit(120),
     sb.from('progress_photos').select('*').eq('client_id', clientId).order('taken_at', { ascending: false }).limit(9),
     sb.from('workout_set_logs').select('*').eq('client_id', clientId).order('logged_date', { ascending: false }).limit(500),
-    sb.from('body_composition_logs').select('*').eq('client_id', clientId).order('report_date', { ascending: false }).limit(30)
+    sb.from('body_composition_logs').select('*').eq('client_id', clientId).order('report_date', { ascending: false }).limit(30),
+    sb.from('workout_sessions').select('*').eq('client_id', clientId).order('session_date', { ascending: false }).limit(30)
   ]);
 
   const workouts = workoutsRes.data || [];
@@ -2530,6 +2894,7 @@ async function renderClientDetailSection(clientId) {
   const photos = photosRes.data || [];
   const clientSetLogs = setLogsRes.data || [];
   const bodyComp = bodyCompRes.data || [];
+  const sessions = (sessionsRes.data || []).filter(s => s.ended_at);
   const loggedExercises = [...new Set(clientSetLogs.filter(s => s.weight).map(s => s.exercise_name))].sort();
   const otherClients = coachClients.filter(c => c.id !== clientId);
 
@@ -2549,7 +2914,7 @@ async function renderClientDetailSection(clientId) {
     hasPhoto: photos.length > 0
   });
 
-  const clientDetailData = { client, workouts, logs, completions, photos, clientSetLogs, bodyComp, loggedExercises, otherClients, badges, clientId };
+  const clientDetailData = { client, workouts, logs, completions, photos, clientSetLogs, bodyComp, sessions, loggedExercises, otherClients, badges, clientId };
 
   viewOutlet.innerHTML = `
     <button id="back-to-roster" class="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 mb-4">
@@ -2560,14 +2925,14 @@ async function renderClientDetailSection(clientId) {
     <div class="flex items-center justify-between gap-2 mb-1">
       <h1 class="font-display text-xl font-semibold text-slate-900 truncate">${escapeHtml(client.name || client.email)}</h1>
       <div class="shrink-0 flex items-center gap-2">
-        ${streak > 0 ? `<span class="flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-1">🔥 ${streak}</span>` : ''}
+        ${streak > 0 ? `<span class="flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1.5">🔥 ${streak}</span>` : ''}
       </div>
     </div>
     <p class="text-sm text-slate-500 mb-4">${adherence.completed}/${adherence.expected} training days hit this week · ${badges.filter(b => b.earned).length}/${badges.length} badges earned</p>
 
     <div class="flex bg-slate-100 rounded-xl p-1 mb-6">
       ${[{ id: 'overview', label: 'Overview' }, { id: 'plan', label: 'Plan' }, { id: 'progress', label: 'Progress' }].map(t => `
-        <button data-client-detail-tab="${t.id}" class="flex-1 py-2 rounded-lg text-sm font-medium transition ${clientDetailView === t.id ? 'bg-emerald-500 text-white' : 'text-slate-500'}">
+        <button data-client-detail-tab="${t.id}" class="flex-1 py-2.5 rounded-lg text-sm font-medium transition ${clientDetailView === t.id ? 'bg-emerald-500 text-white' : 'text-slate-500'}">
           ${t.label}
         </button>
       `).join('')}
@@ -2593,12 +2958,25 @@ function renderClientDetailActiveTab(d) {
 }
 
 function renderClientDetailOverview(d) {
-  const { client, workouts, otherClients, clientId } = d;
+  const { client, workouts, otherClients, clientId, clientSetLogs, completions } = d;
   const restDays = client.rest_days || [];
+  const lifetimeStats = computeLifetimeStats(clientSetLogs, completions);
+  const muscleBreakdown = computeMuscleBreakdown(clientSetLogs);
   return `
     <section class="mb-8">
+      <h2 class="font-display text-lg font-semibold text-slate-900 mb-4">Stats</h2>
+      <div class="flex flex-col gap-3">
+        ${renderLifetimeStatsCard(lifetimeStats)}
+        <div>
+          <p class="text-xs font-medium text-slate-500 mb-2">Muscle focus (by sets logged)</p>
+          ${renderMuscleBreakdownCard(muscleBreakdown)}
+        </div>
+      </div>
+    </section>
+
+    <section class="mb-8">
       <h2 class="font-display text-lg font-semibold text-slate-900 mb-4">Edit client</h2>
-      <form id="edit-client-form" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
+      <form id="edit-client-form" class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
         <div>
           <label class="text-xs text-slate-500 mb-1 block">Name</label>
           <input type="text" id="edit-name" value="${escapeAttr(client.name || '')}" placeholder="${escapeAttr(client.email)}"
@@ -2613,6 +2991,28 @@ function renderClientDetailOverview(d) {
           <label class="text-xs text-slate-500 mb-1 block">Tags (comma separated)</label>
           <input type="text" id="edit-tags" value="${escapeAttr((client.tags || []).join(', '))}" placeholder="e.g. Beginner, Weight loss"
             class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">Goal label</label>
+          <input type="text" id="edit-goal-label" value="${escapeAttr(client.goal_label || '')}" placeholder="e.g. Lose Weight, Build Muscle"
+            class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Target (kg)</label>
+            <input type="number" step="0.1" id="edit-target-weight" value="${escapeAttr(client.target_weight_kg ?? '')}" placeholder="65"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Steps goal</label>
+            <input type="number" step="500" id="edit-steps-goal" value="${escapeAttr(client.steps_goal ?? 8000)}" placeholder="8000"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Water goal (L)</label>
+            <input type="number" step="0.1" id="edit-water-goal" value="${escapeAttr(client.water_goal_liters ?? 2.5)}" placeholder="2.5"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          </div>
         </div>
         <div>
           <label class="text-xs text-slate-500 mb-2 block">Rest days (streak-safe, excluded from adherence)</label>
@@ -2645,7 +3045,7 @@ function renderClientDetailOverview(d) {
 
       <details class="mt-3">
         <summary class="text-xs text-red-600 cursor-pointer">Remove this client</summary>
-        <div class="bg-white border border-red-200 rounded-2xl p-4 shadow-sm mt-2 flex flex-col gap-3">
+        <div class="bg-white border border-red-200 rounded-2xl p-5 shadow-sm mt-2 flex flex-col gap-3">
           <p class="text-xs text-slate-500">This deletes their profile and logs. It does not delete their login — they'll just need a new profile created to sign back in.</p>
           ${workouts.length ? `
             <div>
@@ -2698,8 +3098,16 @@ function renderClientDetailPlan(d) {
 }
 
 function renderClientDetailProgress(d) {
-  const { badges, photos, bodyComp, logs } = d;
+  const { badges, photos, bodyComp, logs, sessions } = d;
   return `
+    ${sessions.length ? `
+    <section class="mb-8">
+      <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Workout sessions</h2>
+      <p class="text-sm text-slate-500 mb-4">Volume and time per completed session.</p>
+      ${renderSessionHistoryList(sessions)}
+    </section>
+    ` : ''}
+
     <section class="mb-8">
       ${renderBadgesSection(badges)}
     </section>
@@ -2782,7 +3190,7 @@ function renderCoachWorkoutRow(w, otherClients) {
     w.days_of_week && w.days_of_week.length ? w.days_of_week.map(d => WEEKDAY_LABELS[d]).join('/') : null
   ].filter(Boolean).join(' · ');
   return `
-    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-center justify-between gap-3">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex items-center justify-between gap-3">
       <div class="min-w-0">
         <h3 class="font-medium text-slate-900 text-sm truncate">${escapeHtml(w.exercise_name)}</h3>
         <p class="text-xs text-slate-500 mt-1">${w.sets} sets · ${escapeHtml(w.target_reps)}${w.target_weight ? ` · ${escapeHtml(w.target_weight)}` : ''}</p>
@@ -2811,7 +3219,7 @@ function renderCoachLogRow(log) {
     log.arms_cm ? `Arms ${log.arms_cm}cm` : null
   ].filter(Boolean).join(' · ');
   return `
-    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col gap-2">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-2">
       <div class="flex items-center justify-between">
         <p class="text-xs text-slate-500">${date}</p>
         ${metrics ? `<p class="text-xs font-medium text-slate-700">${escapeHtml(metrics)}</p>` : ''}
@@ -2839,7 +3247,7 @@ function renderSparkline(values, { label = '', unit = '' } = {}) {
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');
   return `
-    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
       <p class="text-xs text-slate-500 mb-2">${escapeHtml(label)} (${min}${unit}–${max}${unit})</p>
       <svg viewBox="0 0 ${w} ${h}" class="w-full h-20" preserveAspectRatio="none">
         <polyline points="${coords}" fill="none" stroke="#10b981" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
@@ -2907,12 +3315,19 @@ async function handleEditClient(e, clientId) {
   try {
     const restDays = [...document.querySelectorAll('[data-rest-day]:checked')].map(cb => parseInt(cb.dataset.restDay, 10));
     const tags = document.getElementById('edit-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+    const targetWeightVal = document.getElementById('edit-target-weight').value;
+    const stepsGoalVal = document.getElementById('edit-steps-goal').value;
+    const waterGoalVal = document.getElementById('edit-water-goal').value;
     const { error } = await sb.from('profiles').update({
       name: document.getElementById('edit-name').value.trim() || null,
       phone: document.getElementById('edit-phone').value.trim() || null,
       fee_paid: document.getElementById('edit-fee-paid').checked,
       rest_days: restDays,
-      tags
+      tags,
+      goal_label: document.getElementById('edit-goal-label').value.trim() || null,
+      target_weight_kg: targetWeightVal ? parseFloat(targetWeightVal) : null,
+      steps_goal: stepsGoalVal ? parseInt(stepsGoalVal, 10) : 8000,
+      water_goal_liters: waterGoalVal ? parseFloat(waterGoalVal) : 2.5
     }).eq('id', clientId);
     if (error) throw error;
     toast('Client updated.', 'success');
