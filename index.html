@@ -517,6 +517,7 @@ function renderBadgesSection(badges) {
    CLIENT DASHBOARD — tabbed: Home / Workouts / Progress / Profile
 ============================================================ */
 let clientView = 'home';
+let guidedSession = null; // { queue: [...workouts], index: 0 } while a guided session is active
 let clientData = null; // cached fetch result, shared across tabs
 
 async function renderClientDashboardStub() {
@@ -591,6 +592,7 @@ function attachClientTabHandlers() {
 
 function renderActiveClientView() {
   const viewOutlet = document.getElementById('client-view-outlet');
+  if (clientView === 'workouts' && guidedSession) { viewOutlet.innerHTML = renderGuidedSessionView(); attachGuidedSessionHandlers(); return; }
   if (clientView === 'home') viewOutlet.innerHTML = renderClientHomeTab();
   else if (clientView === 'workouts') viewOutlet.innerHTML = renderClientWorkoutsTab();
   else if (clientView === 'progress') viewOutlet.innerHTML = renderClientProgressTab();
@@ -598,7 +600,151 @@ function renderActiveClientView() {
   attachActiveClientViewHandlers();
 }
 
-/* ---------------- HOME ---------------- */
+/* ---------------- GUIDED WORKOUT SESSION ---------------- */
+function splitInstructionsToSteps(instructions) {
+  if (!instructions) return [];
+  const byLine = instructions.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if (byLine.length > 1) return byLine;
+  return instructions.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean);
+}
+
+function handleStartGuidedSession() {
+  const { workouts, completions, todayStr } = clientData;
+  const todayDow = new Date().getDay();
+  const todaysWorkouts = workouts.filter(w => !w.days_of_week || !w.days_of_week.length || w.days_of_week.includes(todayDow));
+  const todayDoneIds = new Set(completions.filter(c => c.completed_date === todayStr).map(c => c.workout_id));
+  const queue = todaysWorkouts.filter(w => !todayDoneIds.has(w.id));
+  if (!queue.length) { toast('Nothing left to do today 🎉', 'info'); return; }
+  guidedSession = { queue, index: 0 };
+  renderActiveClientView();
+}
+
+function handleExitGuidedSession() {
+  guidedSession = null;
+  renderActiveClientView();
+}
+
+function renderGuidedSessionView() {
+  const { queue, index } = guidedSession;
+  const w = queue[index];
+  const total = queue.length;
+  const current = index + 1;
+  const pct = Math.round((index / total) * 100);
+  const todayStr = clientData.todayStr;
+  const todaySetLogs = cachedSetLogs.filter(s => s.workout_id === w.id && s.logged_date === todayStr);
+  const steps = splitInstructionsToSteps(w.instructions);
+  const isLast = current === total;
+
+  return `
+    <div class="flex flex-col gap-5 -mt-1">
+      <div class="flex items-center justify-between">
+        <button id="exit-guided-session-btn" class="text-slate-400 hover:text-slate-600 transition">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+        <p class="text-xs font-medium text-slate-500">Exercise ${current} of ${total}</p>
+        <div class="w-[22px]"></div>
+      </div>
+
+      <div class="w-full bg-slate-100 rounded-full h-1.5">
+        <div class="bg-emerald-500 h-1.5 rounded-full transition-all" style="width:${pct}%"></div>
+      </div>
+
+      <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+        <div class="flex items-center gap-3 mb-1">
+          <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">${ICONS.dumbbell}</div>
+          <div class="min-w-0">
+            <h1 class="font-display text-xl font-semibold text-slate-900 truncate">${escapeHtml(w.exercise_name)}</h1>
+            <p class="text-sm text-slate-500">${w.sets} sets · ${escapeHtml(w.target_reps)}${w.target_weight ? ` · ${escapeHtml(w.target_weight)}` : ''}</p>
+          </div>
+        </div>
+        ${w.video_url ? `
+          <a href="${escapeAttr(w.video_url)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 mt-3 bg-emerald-500/10 text-emerald-700 border border-emerald-200 hover:bg-emerald-500/20 transition rounded-lg px-3 py-2 text-xs font-medium">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            Watch form video
+          </a>
+        ` : ''}
+      </div>
+
+      ${steps.length ? `
+        <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-3">
+          <p class="text-xs font-medium text-slate-500">Form cues</p>
+          ${steps.map((s, i) => `
+            <div class="flex items-start gap-3">
+              <span class="w-6 h-6 rounded-full bg-slate-100 text-slate-600 text-xs font-medium flex items-center justify-center shrink-0">${i + 1}</span>
+              <p class="text-sm text-slate-700 pt-0.5">${escapeHtml(s)}</p>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+
+      <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+        <p class="text-xs font-medium text-slate-500 mb-3">Log your sets</p>
+        <div class="grid grid-cols-[auto_1fr_1fr_1fr] gap-2 text-[10px] text-slate-400 px-0.5 mb-1">
+          <span></span><span>Weight</span><span>Reps</span><span>Type</span>
+        </div>
+        <div id="guided-sets-container" class="flex flex-col gap-2">
+          ${renderSetInputRows(w, todaySetLogs)}
+        </div>
+      </div>
+
+      <button id="guided-next-btn" data-workout-id="${w.id}" data-exercise-name="${escapeAttr(w.exercise_name)}" data-muscle-group="${escapeAttr(w.muscle_group || '')}"
+        class="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-3.5 text-sm transition flex items-center justify-center gap-2">
+        <span id="guided-next-label">${isLast ? '🏁 Finish Workout' : 'Next Exercise →'}</span>
+      </button>
+    </div>
+  `;
+}
+
+function attachGuidedSessionHandlers() {
+  const exitBtn = document.getElementById('exit-guided-session-btn');
+  if (exitBtn) exitBtn.addEventListener('click', handleExitGuidedSession);
+  const nextBtn = document.getElementById('guided-next-btn');
+  if (nextBtn) nextBtn.addEventListener('click', handleGuidedNext);
+}
+
+async function handleGuidedNext() {
+  const btn = document.getElementById('guided-next-btn');
+  const label = document.getElementById('guided-next-label');
+  const container = document.getElementById('guided-sets-container');
+  const workoutId = btn.dataset.workoutId;
+  const exerciseName = btn.dataset.exerciseName;
+  const muscleGroup = btn.dataset.muscleGroup || null;
+  const isLast = guidedSession.index === guidedSession.queue.length - 1;
+
+  btn.disabled = true;
+  const originalLabel = label.textContent;
+  label.innerHTML = `<span class="spinner-light inline-block align-middle"></span>`;
+
+  try {
+    const result = await saveSetRows(workoutId, exerciseName, muscleGroup, container);
+    if (result.saved && result.isPR) {
+      toast(`🎉 New PR on ${exerciseName}: ${result.newMax}kg!`, 'success');
+    } else if (!clientData.completions.some(c => c.workout_id === workoutId && c.completed_date === clientData.todayStr)) {
+      // No sets logged for this one — still mark it done so it doesn't stay stuck in "to do"
+      ensureTodaySessionStarted();
+      await sb.from('workout_completions').upsert(
+        { workout_id: workoutId, client_id: currentUser.id, completed_date: clientData.todayStr },
+        { onConflict: 'workout_id,completed_date' }
+      );
+      clientData.completions.push({ workout_id: workoutId, client_id: currentUser.id, completed_date: clientData.todayStr });
+    }
+
+    if (isLast) {
+      guidedSession = null;
+      await handleFinishWorkout();
+    } else {
+      guidedSession.index++;
+      renderActiveClientView();
+    }
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not save. Check your connection and try again.', 'error');
+    btn.disabled = false;
+    label.textContent = originalLabel;
+  }
+}
+
+
 function renderClientHomeTab() {
   const { logs, completions, streakDates, restDays, workouts, todayStr } = clientData;
   const streak = computeStreak(streakDates, restDays);
@@ -831,6 +977,12 @@ function renderClientWorkoutsTab() {
         <div class="flex flex-col gap-3">
           ${todoWorkouts.length ? todoWorkouts.map(w => renderWorkoutCard(w, false, todaySetLogsByWorkout[w.id] || [])).join('') : (todaysWorkouts.length ? '' : renderEmptyWorkouts())}
         </div>
+
+        ${todoWorkouts.length ? `
+          <button id="start-guided-session-btn" class="w-full mt-3 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-lg py-3 text-sm transition flex items-center justify-center gap-2">
+            ▶ Start Workout
+          </button>
+        ` : ''}
 
         ${doneWorkouts.length && !(todaySession && todaySession.ended_at) ? `
           <button id="finish-workout-btn" class="w-full mt-3 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-3 text-sm transition flex items-center justify-center gap-2">
@@ -1176,6 +1328,8 @@ function attachActiveClientViewHandlers() {
   });
   const finishWorkoutBtn = document.getElementById('finish-workout-btn');
   if (finishWorkoutBtn) finishWorkoutBtn.addEventListener('click', handleFinishWorkout);
+  const startGuidedBtn = document.getElementById('start-guided-session-btn');
+  if (startGuidedBtn) startGuidedBtn.addEventListener('click', handleStartGuidedSession);
   const liftPicker = document.getElementById('lift-picker');
   if (liftPicker) liftPicker.addEventListener('change', () => renderLiftChart(liftPicker.value, cachedSetLogs));
   const loggedExercises = [...new Set(cachedSetLogs.filter(s => s.weight).map(s => s.exercise_name))].sort();
@@ -1706,10 +1860,10 @@ async function handleFinishWorkout() {
   }
 }
 
-function renderWorkoutCard(w, isDone, todaySetLogs = []) {
+function renderSetInputRows(w, todaySetLogs = []) {
   const setsById = {};
   todaySetLogs.forEach(s => { setsById[s.set_number] = s; });
-  const rows = Array.from({ length: parseSetsCount(w.sets) }, (_, i) => i + 1).map(setNum => {
+  return Array.from({ length: parseSetsCount(w.sets) }, (_, i) => i + 1).map(setNum => {
     const existing = setsById[setNum];
     return `
       <div class="grid grid-cols-[auto_1fr_1fr_1fr] gap-2 items-center">
@@ -1726,6 +1880,10 @@ function renderWorkoutCard(w, isDone, todaySetLogs = []) {
       </div>
     `;
   }).join('');
+}
+
+function renderWorkoutCard(w, isDone, todaySetLogs = []) {
+  const rows = renderSetInputRows(w, todaySetLogs);
 
   return `
     <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
@@ -1854,67 +2012,79 @@ function renderLiftChart(exerciseName, setLogs) {
   `;
 }
 
-async function handleSaveSets(workoutId) {
-  const label = document.getElementById(`save-sets-label-${workoutId}`);
-  const btn = document.querySelector(`[data-save-sets="${workoutId}"]`);
-  const exerciseName = btn.dataset.exerciseName;
-  const muscleGroup = btn.dataset.muscleGroup || null;
-  const panel = document.getElementById(`sets-panel-${workoutId}`);
+// Core set-saving logic shared by the list view's "Save sets" and the guided session's "Next Exercise".
+// Returns { saved: boolean, isPR: boolean, newMax: number } — 'saved' is false when there was nothing to save
+// (not an error — the caller decides whether that's OK, e.g. guided mode allows skipping an exercise).
+async function saveSetRows(workoutId, exerciseName, muscleGroup, container) {
   const todayStr = toDateStr(new Date());
-
   const rows = [];
-  panel.querySelectorAll('[data-set-weight]').forEach(input => {
+  container.querySelectorAll('[data-set-weight]').forEach(input => {
     const setNum = parseInt(input.dataset.setWeight, 10);
     const weight = input.value ? parseFloat(input.value) : null;
-    const repsInput = panel.querySelector(`[data-set-reps="${setNum}"]`);
-    const typeInput = panel.querySelector(`[data-set-type="${setNum}"]`);
+    const repsInput = container.querySelector(`[data-set-reps="${setNum}"]`);
+    const typeInput = container.querySelector(`[data-set-type="${setNum}"]`);
     const reps = repsInput.value ? parseInt(repsInput.value, 10) : null;
     if (weight !== null || reps !== null) {
       rows.push({ set_number: setNum, weight, reps, set_type: typeInput.value });
     }
   });
 
-  if (!rows.length) {
-    toast('Enter at least one set before saving.', 'info');
-    return;
+  if (!rows.length) return { saved: false };
+
+  const priorMax = maxWeightForExercise(cachedSetLogs, exerciseName);
+  ensureTodaySessionStarted(); // fire-and-forget
+
+  await sb.from('workout_set_logs').delete().eq('workout_id', workoutId).eq('logged_date', todayStr);
+  const newEntries = rows.map(r => ({
+    workout_id: workoutId,
+    client_id: currentUser.id,
+    exercise_name: exerciseName,
+    muscle_group: muscleGroup,
+    logged_date: todayStr,
+    ...r
+  }));
+  const { data: inserted, error } = await sb.from('workout_set_logs').insert(newEntries).select();
+  if (error) throw error;
+
+  await sb.from('workout_completions').upsert(
+    { workout_id: workoutId, client_id: currentUser.id, completed_date: todayStr },
+    { onConflict: 'workout_id,completed_date' }
+  );
+
+  cachedSetLogs = cachedSetLogs.filter(s => !(s.workout_id === workoutId && s.logged_date === todayStr));
+  cachedSetLogs.push(...(inserted && inserted.length ? inserted : newEntries));
+  if (!clientData.completions.some(c => c.workout_id === workoutId && c.completed_date === todayStr)) {
+    clientData.completions.push({ workout_id: workoutId, client_id: currentUser.id, completed_date: todayStr });
   }
+  if (!clientData.streakDates.includes(todayStr)) clientData.streakDates.push(todayStr);
+
+  const newMax = Math.max(...rows.filter(r => r.weight).map(r => r.weight), 0);
+  const isPR = newMax > 0 && (priorMax === null || newMax > priorMax);
+  return { saved: true, isPR, newMax };
+}
+
+async function handleSaveSets(workoutId) {
+  const label = document.getElementById(`save-sets-label-${workoutId}`);
+  const btn = document.querySelector(`[data-save-sets="${workoutId}"]`);
+  const exerciseName = btn.dataset.exerciseName;
+  const muscleGroup = btn.dataset.muscleGroup || null;
+  const panel = document.getElementById(`sets-panel-${workoutId}`);
 
   btn.disabled = true;
   const originalLabel = label.textContent;
   label.innerHTML = `<span class="spinner-light inline-block align-middle"></span>`;
 
   try {
-    const priorMax = maxWeightForExercise(cachedSetLogs, exerciseName);
-    ensureTodaySessionStarted(); // fire-and-forget
-
-    await sb.from('workout_set_logs').delete().eq('workout_id', workoutId).eq('logged_date', todayStr);
-    const newEntries = rows.map(r => ({
-      workout_id: workoutId,
-      client_id: currentUser.id,
-      exercise_name: exerciseName,
-      muscle_group: muscleGroup,
-      logged_date: todayStr,
-      ...r
-    }));
-    const { data: inserted, error } = await sb.from('workout_set_logs').insert(newEntries).select();
-    if (error) throw error;
-
-    await sb.from('workout_completions').upsert(
-      { workout_id: workoutId, client_id: currentUser.id, completed_date: todayStr },
-      { onConflict: 'workout_id,completed_date' }
-    );
-
-    // Update local caches so the UI reflects this instantly without a full refetch
-    cachedSetLogs = cachedSetLogs.filter(s => !(s.workout_id === workoutId && s.logged_date === todayStr));
-    cachedSetLogs.push(...(inserted && inserted.length ? inserted : newEntries));
-    if (!clientData.completions.some(c => c.workout_id === workoutId && c.completed_date === todayStr)) {
-      clientData.completions.push({ workout_id: workoutId, client_id: currentUser.id, completed_date: todayStr });
+    const result = await saveSetRows(workoutId, exerciseName, muscleGroup, panel);
+    if (!result.saved) {
+      toast('Enter at least one set before saving.', 'info');
+      btn.disabled = false;
+      label.textContent = originalLabel;
+      return;
     }
-    if (!clientData.streakDates.includes(todayStr)) clientData.streakDates.push(todayStr);
 
-    const newMax = Math.max(...rows.filter(r => r.weight).map(r => r.weight), 0);
-    if (newMax > 0 && (priorMax === null || newMax > priorMax)) {
-      toast(`🎉 New PR on ${exerciseName}: ${newMax}kg!`, 'success');
+    if (result.isPR) {
+      toast(`🎉 New PR on ${exerciseName}: ${result.newMax}kg!`, 'success');
     } else {
       toast('Sets saved.', 'success');
     }
