@@ -2091,7 +2091,7 @@ async function handleLogSubmit(e) {
 let coachClients = [];      // cached client profiles
 let exerciseLibrary = [];   // cached reusable exercises
 let routineTemplates = [];  // cached templates with nested .items
-let coachView = 'roster';   // 'roster' | 'library' | 'templates' | 'clientDetail'
+let coachView = 'home';   // 'home' | 'roster' | 'library' | 'templates' | 'clientDetail'
 let selectedClientId = null;
 let clientDetailView = 'overview'; // 'overview' | 'plan' | 'progress'
 let templateDraftItems = []; // exercises being added to a new template, in-memory
@@ -2142,6 +2142,7 @@ async function renderCoachDashboardStub() {
 
 function renderCoachTabsBar() {
   const tabs = [
+    { id: 'home', label: 'Home', icon: ICONS.home },
     { id: 'roster', label: 'Clients', icon: ICONS.users },
     { id: 'library', label: 'Library', icon: ICONS.clipboard },
     { id: 'templates', label: 'Templates', icon: ICONS.dumbbell }
@@ -2165,6 +2166,7 @@ function attachCoachTabHandlers() {
 
 function renderActiveCoachView() {
   const viewOutlet = document.getElementById('coach-view-outlet');
+  if (coachView === 'home') { viewOutlet.innerHTML = renderLoading(); renderCoachHomeTab(); return; }
   if (coachView === 'roster') viewOutlet.innerHTML = renderRosterSection();
   else if (coachView === 'library') viewOutlet.innerHTML = renderLibrarySection();
   else if (coachView === 'templates') viewOutlet.innerHTML = renderTemplatesSection();
@@ -2206,6 +2208,106 @@ function renderRosterStats() {
   `;
 }
 
+/* ---------------- COACH HOME ---------------- */
+async function renderCoachHomeTab() {
+  const viewOutlet = document.getElementById('coach-view-outlet');
+  const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 6);
+  const weekAgoStr = toDateStr(weekAgo);
+
+  const [workoutsRes, sessionsRes] = await Promise.all([
+    sb.from('workouts').select('client_id,days_of_week,day_label,exercise_name'),
+    sb.from('workout_sessions').select('id,session_date,ended_at').not('ended_at', 'is', null).gte('session_date', weekAgoStr)
+  ]);
+
+  const workouts = workoutsRes.data || [];
+  const sessions = sessionsRes.data || [];
+  const activeProgramClientIds = new Set(workouts.map(w => w.client_id));
+  const todayDow = new Date().getDay();
+
+  const scheduleByClient = {};
+  workouts.forEach(w => {
+    const scheduledToday = !w.days_of_week || !w.days_of_week.length || w.days_of_week.includes(todayDow);
+    if (!scheduledToday) return;
+    if (!scheduleByClient[w.client_id]) scheduleByClient[w.client_id] = { count: 0, dayLabel: null };
+    scheduleByClient[w.client_id].count++;
+    if (w.day_label && !scheduleByClient[w.client_id].dayLabel) scheduleByClient[w.client_id].dayLabel = w.day_label;
+  });
+  const todaysSchedule = Object.entries(scheduleByClient)
+    .map(([clientId, info]) => ({ client: coachClients.find(c => c.id === clientId), ...info }))
+    .filter(row => row.client);
+
+  viewOutlet.innerHTML = `
+    <div class="flex flex-col gap-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="font-display text-xl font-semibold text-slate-900">Good day, ${escapeHtml((currentProfile.name || currentUser.email).split(' ')[0])} 👋</h1>
+          <p class="text-sm text-slate-500 mt-0.5">Coach · FitCoach</p>
+        </div>
+        <div class="w-11 h-11 rounded-full bg-emerald-500 text-white flex items-center justify-center font-display font-semibold text-lg shrink-0">${escapeHtml((currentProfile.name || currentUser.email).charAt(0).toUpperCase())}</div>
+      </div>
+
+      <div class="rounded-2xl p-5 text-white" style="background: linear-gradient(135deg, #0f172a, #334155);">
+        <p class="font-display text-xl font-semibold leading-snug">Stronger.<br/>Healthier.<br/>Happier.</p>
+        <p class="text-sm opacity-80 mt-1">Small steps. Big results.</p>
+        <span class="inline-block mt-3 text-xs font-medium bg-white/15 rounded-full px-3 py-1.5">Your clients are counting on you</span>
+      </div>
+
+      <div class="grid grid-cols-3 gap-2">
+        <div class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-sm">
+          <p class="text-xl font-semibold text-slate-900">${coachClients.length}</p>
+          <p class="text-[11px] text-slate-500 mt-0.5">Total Clients</p>
+        </div>
+        <div class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-sm">
+          <p class="text-xl font-semibold text-slate-900">${activeProgramClientIds.size}</p>
+          <p class="text-[11px] text-slate-500 mt-0.5">Active Programs</p>
+        </div>
+        <div class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-sm">
+          <p class="text-xl font-semibold text-slate-900">${sessions.length}</p>
+          <p class="text-[11px] text-slate-500 mt-0.5">Sessions This Week</p>
+        </div>
+      </div>
+
+      <div>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-display text-lg font-semibold text-slate-900">Today's Schedule</h2>
+          <button data-goto-coach-tab="roster" class="text-xs font-medium text-emerald-700">View all</button>
+        </div>
+        ${todaysSchedule.length ? `
+          <div class="bg-white border border-slate-200 rounded-2xl shadow-sm divide-y divide-slate-100">
+            ${todaysSchedule.map(row => `
+              <button data-manage-client="${row.client.id}" class="w-full flex items-center gap-3 p-3.5 text-left">
+                <div class="w-9 h-9 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center font-medium text-sm shrink-0">${escapeHtml((row.client.name || row.client.email).charAt(0).toUpperCase())}</div>
+                <div class="min-w-0 flex-1">
+                  <p class="text-sm font-medium text-slate-900 truncate">${escapeHtml(row.client.name || row.client.email)}</p>
+                  <p class="text-xs text-slate-500">${escapeHtml(row.dayLabel || `${row.count} exercise${row.count === 1 ? '' : 's'}`)}</p>
+                </div>
+                <span class="text-xs font-medium text-emerald-600 shrink-0">Today</span>
+              </button>
+            `).join('')}
+          </div>
+        ` : `<div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm text-center text-sm text-slate-400">No clients scheduled today.</div>`}
+      </div>
+    </div>
+  `;
+
+  document.querySelectorAll('[data-manage-client]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      selectedClientId = btn.dataset.manageClient;
+      coachView = 'clientDetail';
+      renderActiveCoachView();
+    });
+  });
+  document.querySelectorAll('[data-goto-coach-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      coachView = btn.dataset.gotoCoachTab;
+      document.getElementById('bottom-tabs').innerHTML = renderCoachTabsBar();
+      attachCoachTabHandlers();
+      renderActiveCoachView();
+    });
+  });
+}
+
+/* ---------------- ROSTER ---------------- */
 function renderRosterSection() {
   const allTags = [...new Set(coachClients.flatMap(c => c.tags || []))].sort();
   const pendingWithPhone = coachClients.filter(c => !c.fee_paid && c.phone);
