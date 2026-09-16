@@ -745,6 +745,131 @@ async function handleGuidedNext() {
 }
 
 
+/* ---------------- SHARED MONTH CALENDAR ---------------- */
+let calendarViewMonth = new Date();
+let calendarSelectedDate = toDateStr(new Date());
+
+// markedWeekdays: weekday ints (0-6) with a recurring schedule — small green dot.
+// highlightedDates: 'YYYY-MM-DD' strings with real completed activity — small amber dot.
+function renderMonthGrid(viewMonth, selectedDateStr, markedWeekdays, highlightedDates) {
+  const year = viewMonth.getFullYear();
+  const month = viewMonth.getMonth();
+  const startOffset = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const todayStr = toDateStr(new Date());
+  const monthLabel = viewMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
+  const cells = [];
+  for (let i = 0; i < startOffset; i++) cells.push('<div></div>');
+  for (let d = 1; d <= daysInMonth; d++) {
+    const cellDate = new Date(year, month, d);
+    const dateStr = toDateStr(cellDate);
+    const isSelected = dateStr === selectedDateStr;
+    const isToday = dateStr === todayStr;
+    const hasSchedule = markedWeekdays.has(cellDate.getDay());
+    const hasActivity = highlightedDates.has(dateStr);
+    cells.push(`
+      <button data-cal-date="${dateStr}" class="aspect-square flex flex-col items-center justify-center rounded-lg text-sm transition
+        ${isSelected ? 'bg-emerald-500 text-white font-semibold' : isToday ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-slate-700 hover:bg-slate-50'}">
+        ${d}
+        <span class="flex gap-0.5 mt-0.5 h-1">
+          ${hasSchedule ? `<span class="w-1 h-1 rounded-full ${isSelected ? 'bg-white' : 'bg-emerald-400'}"></span>` : ''}
+          ${hasActivity ? `<span class="w-1 h-1 rounded-full ${isSelected ? 'bg-white' : 'bg-amber-400'}"></span>` : ''}
+        </span>
+      </button>
+    `);
+  }
+
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+      <div class="flex items-center justify-between mb-3">
+        <button data-cal-prev-month class="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <p class="text-sm font-semibold text-slate-900">${monthLabel}</p>
+        <button data-cal-next-month class="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+      </div>
+      <div class="grid grid-cols-7 gap-1 text-center text-[10px] text-slate-400 mb-1">
+        ${WEEKDAY_LABELS.map(l => `<div>${l.charAt(0)}</div>`).join('')}
+      </div>
+      <div class="grid grid-cols-7 gap-1">${cells.join('')}</div>
+    </div>
+  `;
+}
+
+function renderMonthGridLegend() {
+  return `
+    <div class="flex items-center gap-4 mt-2 px-1">
+      <span class="flex items-center gap-1.5 text-[11px] text-slate-500"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Scheduled</span>
+      <span class="flex items-center gap-1.5 text-[11px] text-slate-500"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> Completed</span>
+    </div>
+  `;
+}
+
+function attachCalendarHandlers(onChange) {
+  const prev = document.querySelector('[data-cal-prev-month]');
+  if (prev) prev.addEventListener('click', () => {
+    calendarViewMonth = new Date(calendarViewMonth.getFullYear(), calendarViewMonth.getMonth() - 1, 1);
+    onChange();
+  });
+  const next = document.querySelector('[data-cal-next-month]');
+  if (next) next.addEventListener('click', () => {
+    calendarViewMonth = new Date(calendarViewMonth.getFullYear(), calendarViewMonth.getMonth() + 1, 1);
+    onChange();
+  });
+  document.querySelectorAll('[data-cal-date]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      calendarSelectedDate = btn.dataset.calDate;
+      onChange();
+    });
+  });
+}
+
+/* ---------------- CLIENT CALENDAR ---------------- */
+function renderClientCalendarSection(workouts, restDays, completions) {
+  const markedWeekdays = new Set();
+  workouts.forEach(w => {
+    if (w.days_of_week && w.days_of_week.length) w.days_of_week.forEach(d => markedWeekdays.add(d));
+    else for (let d = 0; d < 7; d++) markedWeekdays.add(d);
+  });
+  restDays.forEach(d => markedWeekdays.delete(d));
+  const highlightedDates = new Set(completions.map(c => c.completed_date));
+
+  return `
+    ${renderMonthGrid(calendarViewMonth, calendarSelectedDate, markedWeekdays, highlightedDates)}
+    ${renderMonthGridLegend()}
+    <div class="mt-3">${renderClientCalendarDayDetail(workouts, restDays, completions)}</div>
+  `;
+}
+
+function renderClientCalendarDayDetail(workouts, restDays, completions) {
+  const selected = new Date(calendarSelectedDate + 'T00:00:00');
+  const dow = selected.getDay();
+  const label = selected.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  const isRest = restDays.includes(dow);
+  const dayWorkouts = workouts.filter(w => !w.days_of_week || !w.days_of_week.length || w.days_of_week.includes(dow));
+  const doneIds = new Set(completions.filter(c => c.completed_date === calendarSelectedDate).map(c => c.workout_id));
+
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+      <p class="text-xs font-medium text-slate-500 mb-2">${escapeHtml(label)}</p>
+      ${isRest ? `<p class="text-sm text-slate-700">🌙 Rest day — recover well.</p>` : dayWorkouts.length ? `
+        <div class="flex flex-col gap-2">
+          ${dayWorkouts.map(w => `
+            <div class="flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full ${doneIds.has(w.id) ? 'bg-emerald-500' : 'bg-slate-300'} shrink-0"></span>
+              <p class="text-sm text-slate-700 truncate flex-1">${escapeHtml(w.day_label ? `${w.day_label}: ` : '')}${escapeHtml(w.exercise_name)}</p>
+              ${doneIds.has(w.id) ? `<span class="text-xs text-emerald-600 shrink-0">✓</span>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      ` : `<p class="text-sm text-slate-400">Nothing scheduled.</p>`}
+    </div>
+  `;
+}
+
 function renderClientHomeTab() {
   const { logs, completions, streakDates, restDays, workouts, todayStr } = clientData;
   const streak = computeStreak(streakDates, restDays);
@@ -1007,14 +1132,14 @@ function renderClientWorkoutsTab() {
       </div>
       ` : ''}
 
-      ${hasAnySchedule ? `
-      <details class="group">
+      ${workouts.length ? `
+      <details class="group" id="client-calendar-details">
         <summary class="flex items-center gap-1 cursor-pointer select-none list-none">
           <span class="group-open:rotate-90 transition-transform inline-block text-emerald-700 text-xs">▸</span>
-          <h2 class="font-display text-lg font-semibold text-slate-900">Weekly schedule</h2>
+          <h2 class="font-display text-lg font-semibold text-slate-900">Calendar</h2>
         </summary>
-        <p class="text-sm text-slate-500 mb-4 mt-1">What's assigned across your week.</p>
-        ${renderWeeklySchedule(workouts, restDays)}
+        <p class="text-sm text-slate-500 mb-4 mt-1">Tap a day to see what's scheduled.</p>
+        <div id="client-calendar-outlet">${renderClientCalendarSection(workouts, restDays, completions)}</div>
       </details>
       ` : ''}
 
@@ -1330,6 +1455,13 @@ function attachActiveClientViewHandlers() {
   if (finishWorkoutBtn) finishWorkoutBtn.addEventListener('click', handleFinishWorkout);
   const startGuidedBtn = document.getElementById('start-guided-session-btn');
   if (startGuidedBtn) startGuidedBtn.addEventListener('click', handleStartGuidedSession);
+  if (document.getElementById('client-calendar-outlet')) {
+    attachCalendarHandlers(() => {
+      const { workouts, restDays, completions } = clientData;
+      document.getElementById('client-calendar-outlet').innerHTML = renderClientCalendarSection(workouts, restDays, completions);
+      attachActiveClientViewHandlers();
+    });
+  }
   const liftPicker = document.getElementById('lift-picker');
   if (liftPicker) liftPicker.addEventListener('change', () => renderLiftChart(liftPicker.value, cachedSetLogs));
   const loggedExercises = [...new Set(cachedSetLogs.filter(s => s.weight).map(s => s.exercise_name))].sort();
@@ -2314,8 +2446,9 @@ function renderCoachTabsBar() {
   const tabs = [
     { id: 'home', label: 'Home', icon: ICONS.home },
     { id: 'roster', label: 'Clients', icon: ICONS.users },
+    { id: 'calendar', label: 'Calendar', icon: ICONS.calendar },
     { id: 'library', label: 'Library', icon: ICONS.clipboard },
-    { id: 'templates', label: 'Templates', icon: ICONS.dumbbell }
+    { id: 'templates', label: 'Plans', icon: ICONS.dumbbell }
   ];
   const activeId = (coachView === 'clientDetail') ? 'roster' : coachView;
   return renderTabBar('coach-tabs-inner', tabs, activeId, 'coach-tab');
@@ -2337,11 +2470,106 @@ function attachCoachTabHandlers() {
 function renderActiveCoachView() {
   const viewOutlet = document.getElementById('coach-view-outlet');
   if (coachView === 'home') { viewOutlet.innerHTML = renderLoading(); renderCoachHomeTab(); return; }
+  if (coachView === 'calendar') { viewOutlet.innerHTML = renderLoading(); renderCoachCalendarTab(); return; }
   if (coachView === 'roster') viewOutlet.innerHTML = renderRosterSection();
   else if (coachView === 'library') viewOutlet.innerHTML = renderLibrarySection();
   else if (coachView === 'templates') viewOutlet.innerHTML = renderTemplatesSection();
   else if (coachView === 'clientDetail') { viewOutlet.innerHTML = renderLoading(); renderClientDetailSection(selectedClientId); return; }
   attachActiveCoachViewHandlers();
+}
+
+/* ---------------- COACH CALENDAR ---------------- */
+let coachCalendarData = null;
+
+async function renderCoachCalendarTab() {
+  const [workoutsRes, completionsRes] = await Promise.all([
+    sb.from('workouts').select('id,client_id,days_of_week,day_label,exercise_name'),
+    sb.from('workout_completions').select('client_id,completed_date').limit(2000)
+  ]);
+  coachCalendarData = {
+    workouts: workoutsRes.data || [],
+    completions: completionsRes.data || []
+  };
+  paintCoachCalendar();
+}
+
+function paintCoachCalendar() {
+  const viewOutlet = document.getElementById('coach-view-outlet');
+  const { workouts, completions } = coachCalendarData;
+
+  const markedWeekdays = new Set();
+  workouts.forEach(w => {
+    if (w.days_of_week && w.days_of_week.length) w.days_of_week.forEach(d => markedWeekdays.add(d));
+    else for (let d = 0; d < 7; d++) markedWeekdays.add(d);
+  });
+  const highlightedDates = new Set(completions.map(c => c.completed_date));
+
+  viewOutlet.innerHTML = `
+    <div class="flex flex-col gap-5">
+      <div>
+        <h1 class="font-display text-xl font-semibold text-slate-900">Calendar</h1>
+        <p class="text-sm text-slate-500 mt-0.5">Who's training, and when.</p>
+      </div>
+      ${renderMonthGrid(calendarViewMonth, calendarSelectedDate, markedWeekdays, highlightedDates)}
+      ${renderMonthGridLegend()}
+      ${renderCoachCalendarDayDetail()}
+    </div>
+  `;
+
+  attachCalendarHandlers(paintCoachCalendar);
+  document.querySelectorAll('[data-manage-client]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      selectedClientId = btn.dataset.manageClient;
+      coachView = 'clientDetail';
+      document.getElementById('bottom-tabs').innerHTML = renderCoachTabsBar();
+      attachCoachTabHandlers();
+      renderActiveCoachView();
+    });
+  });
+}
+
+function renderCoachCalendarDayDetail() {
+  const { workouts, completions } = coachCalendarData;
+  const selected = new Date(calendarSelectedDate + 'T00:00:00');
+  const dow = selected.getDay();
+  const label = selected.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+
+  const byClient = {};
+  workouts.forEach(w => {
+    const scheduled = !w.days_of_week || !w.days_of_week.length || w.days_of_week.includes(dow);
+    if (!scheduled) return;
+    const client = coachClients.find(c => c.id === w.client_id);
+    if (!client) return; // not one of this coach's clients
+    if ((client.rest_days || []).includes(dow)) return;
+    if (!byClient[w.client_id]) byClient[w.client_id] = { client, count: 0, dayLabel: null };
+    byClient[w.client_id].count++;
+    if (w.day_label && !byClient[w.client_id].dayLabel) byClient[w.client_id].dayLabel = w.day_label;
+  });
+
+  const completedClientIds = new Set(completions.filter(c => c.completed_date === calendarSelectedDate).map(c => c.client_id));
+  const rows = Object.values(byClient);
+
+  return `
+    <div>
+      <p class="text-xs font-medium text-slate-500 mb-2">${escapeHtml(label)} · ${rows.length} client${rows.length === 1 ? '' : 's'}</p>
+      ${rows.length ? `
+        <div class="bg-white border border-slate-200 rounded-2xl shadow-sm divide-y divide-slate-100">
+          ${rows.map(r => `
+            <button data-manage-client="${r.client.id}" class="w-full flex items-center gap-3 p-3.5 text-left">
+              <div class="w-9 h-9 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center font-medium text-sm shrink-0">${escapeHtml((r.client.name || r.client.email).charAt(0).toUpperCase())}</div>
+              <div class="min-w-0 flex-1">
+                <p class="text-sm font-medium text-slate-900 truncate">${escapeHtml(r.client.name || r.client.email)}</p>
+                <p class="text-xs text-slate-500">${escapeHtml(r.dayLabel || `${r.count} exercise${r.count === 1 ? '' : 's'}`)}</p>
+              </div>
+              ${completedClientIds.has(r.client.id)
+                ? `<span class="text-xs font-medium text-emerald-600 shrink-0">Completed</span>`
+                : `<span class="text-xs text-slate-400 shrink-0">Scheduled</span>`}
+            </button>
+          `).join('')}
+        </div>
+      ` : `<div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm text-center text-sm text-slate-400">No clients scheduled this day.</div>`}
+    </div>
+  `;
 }
 
 /* ---------------- ROSTER ---------------- */
