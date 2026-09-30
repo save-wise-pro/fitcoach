@@ -356,7 +356,8 @@ const ICONS = {
   calendar: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
   chat: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 1 1-3.5-6.6"/><path d="M21 3v6h-6"/></svg>',
   more: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>',
-  clipboard: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="12" height="17" rx="2"/><rect x="9" y="2.5" width="6" height="3" rx="1"/><path d="M9 11h6M9 15h6"/></svg>'
+  clipboard: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="12" height="17" rx="2"/><rect x="9" y="2.5" width="6" height="3" rx="1"/><path d="M9 11h6M9 15h6"/></svg>',
+  apple: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8c-1-2.5-3.5-3.5-5.5-2.5S3.5 9.5 4.5 13s3 7 5 7c1 0 1.5-.5 2.5-.5s1.5.5 2.5.5c2 0 4-3.5 5-7s-.5-6.5-2.5-7.5S13 5.5 12 8z"/><path d="M12 8V5a3 3 0 0 1 3-3"/></svg>'
 };
 
 function renderTabBar(containerId, tabs, activeId, dataAttr) {
@@ -518,6 +519,9 @@ function renderBadgesSection(badges) {
 ============================================================ */
 let clientView = 'home';
 let guidedSession = null; // { queue: [...workouts], index: 0 } while a guided session is active
+let chatOpen = false;
+let chatPartner = null;
+let chatMessages = [];
 let clientData = null; // cached fetch result, shared across tabs
 
 async function renderClientDashboardStub() {
@@ -525,7 +529,7 @@ async function renderClientDashboardStub() {
   outlet.innerHTML = renderLoading();
   const todayStr = toDateStr(new Date());
 
-  const [workoutsRes, logsRes, completionsRes, photosRes, setLogsRes, coachRes, bodyCompRes, sessionsRes] = await Promise.all([
+  const [workoutsRes, logsRes, completionsRes, photosRes, setLogsRes, coachRes, bodyCompRes, sessionsRes, mealsRes] = await Promise.all([
     sb.from('workouts').select('*').eq('client_id', currentUser.id).order('created_at', { ascending: false }),
     sb.from('progress_logs').select('*').eq('client_id', currentUser.id).order('logged_at', { ascending: false }).limit(60),
     sb.from('workout_completions').select('*').eq('client_id', currentUser.id).order('completed_date', { ascending: false }).limit(120),
@@ -533,7 +537,8 @@ async function renderClientDashboardStub() {
     sb.from('workout_set_logs').select('*').eq('client_id', currentUser.id).order('logged_date', { ascending: false }).limit(500),
     currentProfile.coach_id ? sb.from('profiles').select('name,email,phone').eq('id', currentProfile.coach_id).single() : Promise.resolve({ data: null }),
     sb.from('body_composition_logs').select('*').eq('client_id', currentUser.id).order('report_date', { ascending: false }).limit(30),
-    sb.from('workout_sessions').select('*').eq('client_id', currentUser.id).order('session_date', { ascending: false }).limit(30)
+    sb.from('workout_sessions').select('*').eq('client_id', currentUser.id).order('session_date', { ascending: false }).limit(30),
+    sb.from('meal_logs').select('*').eq('client_id', currentUser.id).order('log_date', { ascending: false }).limit(300)
   ]);
 
   if (workoutsRes.error) {
@@ -550,6 +555,7 @@ async function renderClientDashboardStub() {
   const coach = coachRes.data || null;
   const bodyComp = bodyCompRes.data || [];
   const sessions = sessionsRes.data || [];
+  const meals = mealsRes.data || [];
   const todaySession = sessions.find(s => s.session_date === todayStr) || null;
   const restDays = currentProfile.rest_days || [];
 
@@ -558,7 +564,7 @@ async function renderClientDashboardStub() {
     ...completions.map(c => c.completed_date)
   ])];
 
-  clientData = { workouts, logs, completions, photos, coach, bodyComp, sessions, todaySession, restDays, streakDates, todayStr };
+  clientData = { workouts, logs, completions, photos, coach, bodyComp, sessions, meals, todaySession, restDays, streakDates, todayStr };
 
   outlet.innerHTML = `
     <div class="animate-fade-in" id="client-view-outlet"></div>
@@ -572,6 +578,7 @@ function renderClientTabsBar() {
   const tabs = [
     { id: 'home', label: 'Home', icon: ICONS.home },
     { id: 'workouts', label: 'Workouts', icon: ICONS.dumbbell },
+    { id: 'nutrition', label: 'Nutrition', icon: ICONS.apple },
     { id: 'progress', label: 'Progress', icon: ICONS.trendingUp },
     { id: 'profile', label: 'Profile', icon: ICONS.user }
   ];
@@ -593,11 +600,330 @@ function attachClientTabHandlers() {
 function renderActiveClientView() {
   const viewOutlet = document.getElementById('client-view-outlet');
   if (clientView === 'workouts' && guidedSession) { viewOutlet.innerHTML = renderGuidedSessionView(); attachGuidedSessionHandlers(); return; }
+  if (clientView === 'profile' && chatOpen) { viewOutlet.innerHTML = renderLoading(); openChatWith(clientData.coach); return; }
   if (clientView === 'home') viewOutlet.innerHTML = renderClientHomeTab();
   else if (clientView === 'workouts') viewOutlet.innerHTML = renderClientWorkoutsTab();
+  else if (clientView === 'nutrition') viewOutlet.innerHTML = renderClientNutritionTab();
   else if (clientView === 'progress') viewOutlet.innerHTML = renderClientProgressTab();
   else if (clientView === 'profile') viewOutlet.innerHTML = renderClientProfileTab();
   attachActiveClientViewHandlers();
+}
+
+/* ---------------- IN-APP CHAT (shared: client <-> coach) ---------------- */
+async function openChatWith(partner) {
+  if (!partner) { toast('No coach assigned yet.', 'info'); return; }
+  chatPartner = partner;
+  chatOpen = true;
+  const { data, error } = await sb.from('messages')
+    .select('*')
+    .or(`and(sender_id.eq.${currentUser.id},recipient_id.eq.${partner.id}),and(sender_id.eq.${partner.id},recipient_id.eq.${currentUser.id})`)
+    .order('created_at', { ascending: true });
+  if (error) { console.error(error); toast('Could not load chat.', 'error'); return; }
+  chatMessages = data || [];
+  const unreadIds = chatMessages.filter(m => m.recipient_id === currentUser.id && !m.read_at).map(m => m.id);
+  if (unreadIds.length) sb.from('messages').update({ read_at: new Date().toISOString() }).in('id', unreadIds).then(() => {});
+  paintChatView();
+}
+
+function paintChatView() {
+  const outlet = document.getElementById(currentProfile.role === 'coach' ? 'coach-view-outlet' : 'client-view-outlet');
+  const partnerName = chatPartner.name || chatPartner.email;
+  outlet.innerHTML = `
+    <div class="flex flex-col" style="height: calc(100vh - 220px);">
+      <div class="flex items-center gap-3 pb-3 border-b border-slate-200 mb-3">
+        <button id="chat-back-btn" class="text-slate-400 hover:text-slate-600 transition">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <div class="w-9 h-9 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center font-medium text-sm shrink-0">${escapeHtml(partnerName.charAt(0).toUpperCase())}</div>
+        <p class="text-sm font-medium text-slate-900 truncate">${escapeHtml(partnerName)}</p>
+      </div>
+      <div id="chat-messages" class="flex-1 overflow-y-auto flex flex-col gap-2 pb-3">
+        ${chatMessages.length ? chatMessages.map(renderChatBubble).join('') : `<p class="text-center text-sm text-slate-400 mt-8">Say hello 👋</p>`}
+      </div>
+      <form id="chat-form" class="flex items-center gap-2 pt-2 border-t border-slate-200">
+        <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off"
+          class="flex-1 bg-slate-50 border border-slate-300 rounded-full px-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60" />
+        <button type="submit" class="w-10 h-10 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center transition shrink-0">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+        </button>
+      </form>
+    </div>
+  `;
+  document.getElementById('chat-back-btn').addEventListener('click', closeChatView);
+  document.getElementById('chat-form').addEventListener('submit', handleSendMessage);
+  const msgContainer = document.getElementById('chat-messages');
+  msgContainer.scrollTop = msgContainer.scrollHeight;
+  document.getElementById('chat-input').focus();
+}
+
+function renderChatBubble(m) {
+  const mine = m.sender_id === currentUser.id;
+  const time = new Date(m.created_at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `
+    <div class="flex ${mine ? 'justify-end' : 'justify-start'}">
+      <div class="max-w-[75%] ${mine ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-900'} rounded-2xl px-3.5 py-2">
+        <p class="text-sm break-words">${escapeHtml(m.body)}</p>
+        <p class="text-[10px] ${mine ? 'text-emerald-50/80' : 'text-slate-400'} mt-0.5">${time}</p>
+      </div>
+    </div>
+  `;
+}
+
+async function handleSendMessage(e) {
+  e.preventDefault();
+  const input = document.getElementById('chat-input');
+  const body = input.value.trim();
+  if (!body) return;
+  input.value = '';
+  try {
+    const { data, error } = await sb.from('messages').insert({
+      sender_id: currentUser.id,
+      recipient_id: chatPartner.id,
+      body
+    }).select().single();
+    if (error) throw error;
+    chatMessages.push(data);
+    paintChatView();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not send message.', 'error');
+    input.value = body;
+  }
+}
+
+function closeChatView() {
+  chatOpen = false;
+  if (currentProfile.role === 'coach') {
+    clientDetailView = 'overview';
+    renderClientDetailSection(chatPartner.id);
+  } else {
+    renderActiveClientView();
+  }
+}
+
+/* ---------------- NUTRITION ---------------- */
+const MEAL_TYPES = [
+  { id: 'breakfast', label: 'Breakfast', emoji: '🍳' },
+  { id: 'lunch', label: 'Lunch', emoji: '🥗' },
+  { id: 'dinner', label: 'Dinner', emoji: '🍛' },
+  { id: 'snack', label: 'Snack', emoji: '🍎' }
+];
+
+function renderCalorieRing(consumed, goal) {
+  const pct = goal > 0 ? Math.min(100, (consumed / goal) * 100) : 0;
+  const r = 52, cx = 70, cy = 70;
+  const circumference = 2 * Math.PI * r;
+  const dash = (pct / 100) * circumference;
+  const remaining = Math.max(0, Math.round(goal - consumed));
+  return `
+    <div class="flex flex-col items-center">
+      <svg width="140" height="140" viewBox="0 0 140 140">
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#e2e8f0" stroke-width="12" />
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#10b981" stroke-width="12" stroke-linecap="round"
+          stroke-dasharray="${dash.toFixed(1)} ${circumference.toFixed(1)}" transform="rotate(-90 ${cx} ${cy})" />
+        <text x="${cx}" y="${cy - 4}" text-anchor="middle" class="fill-slate-900" style="font-size:26px;font-weight:600;font-family:'Space Grotesk',sans-serif;">${Math.round(consumed)}</text>
+        <text x="${cx}" y="${cy + 16}" text-anchor="middle" class="fill-slate-400" style="font-size:11px;">of ${Math.round(goal)} kcal</text>
+      </svg>
+      <p class="text-xs text-slate-500 mt-1">${consumed > goal ? `${Math.round(consumed - goal)} kcal over` : `${remaining} kcal left`}</p>
+    </div>
+  `;
+}
+
+function renderMacroBar(label, current, goal, color) {
+  const pct = goal > 0 ? Math.min(100, Math.round((current / goal) * 100)) : 0;
+  return `
+    <div>
+      <div class="flex items-center justify-between text-xs mb-1">
+        <span class="flex items-center gap-1.5 text-slate-700 font-medium"><span class="w-2 h-2 rounded-full" style="background:${color}"></span>${label}</span>
+        <span class="text-slate-500">${Math.round(current)} / ${Math.round(goal)}g</span>
+      </div>
+      <div class="w-full bg-slate-100 rounded-full h-2">
+        <div class="h-2 rounded-full" style="width:${pct}%;background:${color}"></div>
+      </div>
+    </div>
+  `;
+}
+
+function renderClientNutritionTab() {
+  const meals = clientData.meals || [];
+  const todaysMeals = meals.filter(m => m.log_date === calendarSelectedDate);
+  const totals = todaysMeals.reduce((acc, m) => ({
+    calories: acc.calories + (parseFloat(m.calories) || 0),
+    protein: acc.protein + (parseFloat(m.protein_g) || 0),
+    carbs: acc.carbs + (parseFloat(m.carbs_g) || 0),
+    fats: acc.fats + (parseFloat(m.fats_g) || 0)
+  }), { calories: 0, protein: 0, carbs: 0, fats: 0 });
+
+  const calorieGoal = currentProfile.calorie_goal || 2000;
+  const isToday = calendarSelectedDate === toDateStr(new Date());
+  const dateLabel = isToday ? 'Today' : new Date(calendarSelectedDate + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+
+  return `
+    <div class="flex flex-col gap-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="font-display text-xl font-semibold text-slate-900">Nutrition</h1>
+          <p class="text-sm text-slate-500 mt-0.5">${escapeHtml(dateLabel)}</p>
+        </div>
+        ${!isToday ? `<button id="nutrition-jump-today" class="text-xs font-medium text-emerald-700">Back to today</button>` : ''}
+      </div>
+
+      <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+        ${renderCalorieRing(totals.calories, calorieGoal)}
+        <div class="flex flex-col gap-3 mt-4">
+          ${renderMacroBar('Protein', totals.protein, currentProfile.protein_goal_g || 150, '#10b981')}
+          ${renderMacroBar('Carbs', totals.carbs, currentProfile.carbs_goal_g || 250, '#f59e0b')}
+          ${renderMacroBar('Fats', totals.fats, currentProfile.fats_goal_g || 70, '#8b5cf6')}
+        </div>
+      </div>
+
+      <div>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-3">Meals</h2>
+        <div class="flex flex-col gap-3">
+          ${MEAL_TYPES.map(mt => renderMealSlot(mt, todaysMeals.filter(m => m.meal_type === mt.id))).join('')}
+        </div>
+      </div>
+
+      <div>
+        <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Add a meal</h2>
+        <p class="text-sm text-slate-500 mb-4">Only the name is required — add macros if you know them.</p>
+        ${renderMealForm()}
+      </div>
+    </div>
+  `;
+}
+
+function renderMealSlot(mealType, items) {
+  const slotCals = items.reduce((sum, m) => sum + (parseFloat(m.calories) || 0), 0);
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+        <p class="text-xs font-medium text-slate-700">${mealType.emoji} ${mealType.label}</p>
+        ${items.length ? `<p class="text-xs text-slate-500">${Math.round(slotCals)} kcal</p>` : ''}
+      </div>
+      ${items.length ? `
+        <div class="divide-y divide-slate-100">
+          ${items.map(m => `
+            <div class="flex items-center gap-3 px-4 py-3">
+              <div class="min-w-0 flex-1">
+                <p class="text-sm text-slate-900 truncate">${escapeHtml(m.description)}</p>
+                ${(m.protein_g || m.carbs_g || m.fats_g) ? `
+                  <p class="text-[11px] text-slate-400 mt-0.5">
+                    ${[m.protein_g ? `P ${m.protein_g}g` : null, m.carbs_g ? `C ${m.carbs_g}g` : null, m.fats_g ? `F ${m.fats_g}g` : null].filter(Boolean).join(' · ')}
+                  </p>
+                ` : ''}
+              </div>
+              ${m.calories ? `<p class="text-xs font-medium text-slate-600 shrink-0">${Math.round(m.calories)}</p>` : ''}
+              <button data-delete-meal="${m.id}" class="text-slate-300 hover:text-red-600 transition shrink-0">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+              </button>
+            </div>
+          `).join('')}
+        </div>
+      ` : `<p class="px-4 py-3 text-xs text-slate-400">Nothing logged.</p>`}
+    </div>
+  `;
+}
+
+function renderMealForm() {
+  return `
+    <form id="meal-form" class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+      <div>
+        <label class="text-xs text-slate-500 mb-1 block">Meal</label>
+        <select id="meal-type" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500">
+          ${MEAL_TYPES.map(mt => `<option value="${mt.id}">${mt.emoji} ${mt.label}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-slate-500 mb-1 block">What did you eat?</label>
+        <input required type="text" id="meal-description" placeholder="e.g. Grilled chicken + brown rice"
+          class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+      </div>
+      <div>
+        <label class="text-xs text-slate-500 mb-1 block">Calories</label>
+        <input type="number" step="1" min="0" id="meal-calories" placeholder="450"
+          class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+      </div>
+      <details class="group">
+        <summary class="text-xs font-medium text-emerald-700 cursor-pointer select-none list-none flex items-center gap-1">
+          <span class="group-open:rotate-90 transition-transform inline-block">▸</span> Add macros (optional)
+        </summary>
+        <div class="grid grid-cols-3 gap-3 mt-3">
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Protein (g)</label>
+            <input type="number" step="0.1" min="0" id="meal-protein" placeholder="40"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Carbs (g)</label>
+            <input type="number" step="0.1" min="0" id="meal-carbs" placeholder="55"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">Fats (g)</label>
+            <input type="number" step="0.1" min="0" id="meal-fats" placeholder="12"
+              class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60" />
+          </div>
+        </div>
+      </details>
+      <button type="submit" id="meal-submit" class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg py-2.5 text-sm transition flex items-center justify-center gap-2">
+        <span id="meal-submit-label">Add meal</span>
+      </button>
+    </form>
+  `;
+}
+
+async function handleAddMeal(e) {
+  e.preventDefault();
+  const submitBtn = document.getElementById('meal-submit');
+  const label = document.getElementById('meal-submit-label');
+  const description = document.getElementById('meal-description').value.trim();
+  if (!description) { toast('Add what you ate first.', 'info'); return; }
+
+  submitBtn.disabled = true;
+  const originalLabel = label.textContent;
+  label.innerHTML = `<span class="spinner-light inline-block align-middle"></span>`;
+
+  try {
+    const calVal = document.getElementById('meal-calories').value;
+    const pVal = document.getElementById('meal-protein').value;
+    const cVal = document.getElementById('meal-carbs').value;
+    const fVal = document.getElementById('meal-fats').value;
+    const row = {
+      client_id: currentUser.id,
+      log_date: calendarSelectedDate,
+      meal_type: document.getElementById('meal-type').value,
+      description,
+      calories: calVal ? parseFloat(calVal) : null,
+      protein_g: pVal ? parseFloat(pVal) : null,
+      carbs_g: cVal ? parseFloat(cVal) : null,
+      fats_g: fVal ? parseFloat(fVal) : null
+    };
+    const { data: inserted, error } = await sb.from('meal_logs').insert(row).select();
+    if (error) throw error;
+
+    clientData.meals = [...(inserted && inserted.length ? inserted : [row]), ...(clientData.meals || [])];
+    toast('Meal added.', 'success');
+    renderActiveClientView();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not add meal.', 'error');
+    submitBtn.disabled = false;
+    label.textContent = originalLabel;
+  }
+}
+
+async function handleDeleteMeal(mealId) {
+  try {
+    const { error } = await sb.from('meal_logs').delete().eq('id', mealId);
+    if (error) throw error;
+    clientData.meals = (clientData.meals || []).filter(m => m.id !== mealId);
+    toast('Meal removed.', 'info');
+    renderActiveClientView();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not remove meal.', 'error');
+  }
 }
 
 /* ---------------- GUIDED WORKOUT SESSION ---------------- */
@@ -1191,6 +1517,7 @@ function renderClientProgressTab() {
         <p class="text-sm text-slate-500 mb-4">How things are moving overall.</p>
         <div class="flex flex-col gap-3">
           ${renderSinceJoinedCard(sinceJoined)}
+          ${renderStepsTrendChart(logs, currentProfile.steps_goal || 8000)}
           ${renderAdherenceTrendSection(streakDates, restDays)}
         </div>
       </div>
@@ -1348,17 +1675,22 @@ function renderClientProfileTab() {
       <div>
         <h2 class="font-display text-lg font-semibold text-slate-900 mb-4">Your coach</h2>
         <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex items-center justify-between gap-3">
-          <div>
-            <p class="text-sm font-medium text-slate-900">${escapeHtml(coach.name || coach.email)}</p>
-            <p class="text-xs text-slate-500 mt-0.5">${escapeHtml(coach.email)}</p>
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-slate-900 truncate">${escapeHtml(coach.name || coach.email)}</p>
+            <p class="text-xs text-slate-500 mt-0.5 truncate">${escapeHtml(coach.email)}</p>
           </div>
-          ${coach.phone ? `
-            <a href="https://wa.me/${escapeAttr(coach.phone.replace(/[^0-9]/g, ''))}?text=${encodeURIComponent('Hi! Just checking in about my training.')}" target="_blank" rel="noopener noreferrer"
-              class="shrink-0 flex items-center gap-1.5 bg-emerald-500 text-white rounded-lg px-3 py-2 text-xs font-medium hover:bg-emerald-600 transition">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0012.04 2zm0 18.15h-.01a8.2 8.2 0 01-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.2 8.2 0 01-1.26-4.38c0-4.54 3.7-8.24 8.25-8.24 2.2 0 4.27.86 5.83 2.42a8.18 8.18 0 012.41 5.83c0 4.55-3.7 8.23-8.24 8.23zm4.52-6.16c-.25-.12-1.47-.72-1.69-.81-.23-.08-.4-.12-.56.13-.17.25-.64.81-.79.97-.14.17-.29.19-.54.06-.25-.12-1.05-.39-2-1.23-.74-.66-1.24-1.47-1.39-1.72-.14-.25-.02-.38.11-.51.11-.11.25-.29.37-.43.12-.14.16-.25.25-.41.08-.17.04-.31-.02-.43-.06-.12-.56-1.35-.77-1.85-.2-.48-.41-.42-.56-.43-.14-.01-.31-.01-.48-.01-.17 0-.43.06-.66.31-.23.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.17 1.75 2.67 4.24 3.74.59.26 1.06.41 1.42.52.6.19 1.14.16 1.57.1.48-.07 1.47-.6 1.68-1.18.21-.58.21-1.07.14-1.18-.06-.1-.23-.16-.48-.28z"/></svg>
-              Message
-            </a>
-          ` : ''}
+          <div class="flex items-center gap-2 shrink-0">
+            <button id="open-chat-btn" class="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg px-3 py-2 text-xs font-medium hover:bg-emerald-100 transition">
+              ${ICONS.chat}
+              Chat
+            </button>
+            ${coach.phone ? `
+              <a href="https://wa.me/${escapeAttr(coach.phone.replace(/[^0-9]/g, ''))}?text=${encodeURIComponent('Hi! Just checking in about my training.')}" target="_blank" rel="noopener noreferrer"
+                class="flex items-center justify-center w-9 h-9 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0012.04 2zm0 18.15h-.01a8.2 8.2 0 01-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.2 8.2 0 01-1.26-4.38c0-4.54 3.7-8.24 8.25-8.24 2.2 0 4.27.86 5.83 2.42a8.18 8.18 0 012.41 5.83c0 4.55-3.7 8.23-8.24 8.23zm4.52-6.16c-.25-.12-1.47-.72-1.69-.81-.23-.08-.4-.12-.56.13-.17.25-.64.81-.79.97-.14.17-.29.19-.54.06-.25-.12-1.05-.39-2-1.23-.74-.66-1.24-1.47-1.39-1.72-.14-.25-.02-.38.11-.51.11-.11.25-.29.37-.43.12-.14.16-.25.25-.41.08-.17.04-.31-.02-.43-.06-.12-.56-1.35-.77-1.85-.2-.48-.41-.42-.56-.43-.14-.01-.31-.01-.48-.01-.17 0-.43.06-.66.31-.23.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.17 1.75 2.67 4.24 3.74.59.26 1.06.41 1.42.52.6.19 1.14.16 1.57.1.48-.07 1.47-.6 1.68-1.18.21-.58.21-1.07.14-1.18-.06-.1-.23-.16-.48-.28z"/></svg>
+              </a>
+            ` : ''}
+          </div>
         </div>
       </div>
       ` : ''}
@@ -1423,8 +1755,20 @@ function attachActiveClientViewHandlers() {
   if (photoClearBtn) photoClearBtn.addEventListener('click', handlePhotoFileClear);
   const bodyCompForm = document.getElementById('bodycomp-form');
   if (bodyCompForm) bodyCompForm.addEventListener('submit', handleSaveBodyComp);
+  const mealForm = document.getElementById('meal-form');
+  if (mealForm) mealForm.addEventListener('submit', handleAddMeal);
+  document.querySelectorAll('[data-delete-meal]').forEach(btn => {
+    btn.addEventListener('click', () => handleDeleteMeal(btn.dataset.deleteMeal));
+  });
+  const nutritionJumpTodayBtn = document.getElementById('nutrition-jump-today');
+  if (nutritionJumpTodayBtn) nutritionJumpTodayBtn.addEventListener('click', () => {
+    calendarSelectedDate = toDateStr(new Date());
+    renderActiveClientView();
+  });
   const profileForm = document.getElementById('profile-form');
   if (profileForm) profileForm.addEventListener('submit', handleProfileUpdate);
+  const openChatBtn = document.getElementById('open-chat-btn');
+  if (openChatBtn) openChatBtn.addEventListener('click', () => openChatWith(clientData.coach));
   document.querySelectorAll('[data-goto-tab]').forEach(btn => {
     btn.addEventListener('click', () => {
       clientView = btn.dataset.gotoTab;
@@ -1836,6 +2180,48 @@ function renderBodyCompHistory(entries) {
           </div>
         `;
       }).join('')}
+    </div>
+  `;
+}
+
+function computeDailySteps(logs, days = 7) {
+  const byDate = {};
+  logs.forEach(l => {
+    if (l.steps === null || l.steps === undefined) return;
+    const d = toDateStr(new Date(l.logged_at));
+    if (!byDate[d] || l.steps > byDate[d]) byDate[d] = l.steps;
+  });
+  const result = [];
+  const today = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today); d.setDate(d.getDate() - i);
+    const dStr = toDateStr(d);
+    result.push({ date: dStr, label: d.toLocaleDateString(undefined, { weekday: 'short' }).charAt(0), steps: byDate[dStr] || 0 });
+  }
+  return result;
+}
+
+function renderStepsTrendChart(logs, stepsGoal) {
+  const days = computeDailySteps(logs, 7);
+  const max = Math.max(stepsGoal, ...days.map(d => d.steps), 1);
+  const w = 320, h = 70, barGap = 4;
+  const barWidth = (w - barGap * 6) / 7;
+  const bars = days.map((d, i) => {
+    const barHeight = Math.max(2, (d.steps / max) * (h - 4));
+    const x = i * (barWidth + barGap);
+    const y = h - barHeight;
+    const met = d.steps >= stepsGoal;
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barHeight.toFixed(1)}" rx="2" fill="${met ? '#10b981' : '#cbd5e1'}" />`;
+  }).join('');
+  const avg = Math.round(days.reduce((a, b) => a + b.steps, 0) / days.length);
+  return `
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+      <p class="text-xs text-slate-500 mb-3">Steps — last 7 days</p>
+      <svg viewBox="0 0 ${w} ${h}" class="w-full" style="height: 70px" preserveAspectRatio="none">${bars}</svg>
+      <div class="grid grid-cols-7 gap-1 mt-1">
+        ${days.map(d => `<div class="text-center text-[9px] text-slate-400">${d.label}</div>`).join('')}
+      </div>
+      <p class="text-xs text-slate-500 mt-2">Avg ${avg.toLocaleString()} steps/day</p>
     </div>
   `;
 }
@@ -2398,7 +2784,7 @@ let selectedClientId = null;
 let clientDetailView = 'overview'; // 'overview' | 'plan' | 'progress'
 let templateDraftItems = []; // exercises being added to a new template, in-memory
 let rosterSearch = '';
-let rosterStatusFilter = 'all'; // 'all' | 'paid' | 'pending'
+let rosterStatusFilter = 'all'; // 'all' | 'active' | 'on_hold' | 'completed'
 let rosterTagFilter = 'all';
 
 async function renderCoachDashboardStub() {
@@ -2520,6 +2906,7 @@ function paintCoachCalendar() {
   document.querySelectorAll('[data-manage-client]').forEach(btn => {
     btn.addEventListener('click', () => {
       selectedClientId = btn.dataset.manageClient;
+      clientDetailView = 'overview';
       coachView = 'clientDetail';
       document.getElementById('bottom-tabs').innerHTML = renderCoachTabsBar();
       attachCoachTabHandlers();
@@ -2577,8 +2964,7 @@ function getFilteredClients() {
   const q = rosterSearch.trim().toLowerCase();
   return coachClients.filter(c => {
     if (q && !(c.name || '').toLowerCase().includes(q) && !c.email.toLowerCase().includes(q)) return false;
-    if (rosterStatusFilter === 'paid' && !c.fee_paid) return false;
-    if (rosterStatusFilter === 'pending' && c.fee_paid) return false;
+    if (rosterStatusFilter !== 'all' && (c.program_status || 'active') !== rosterStatusFilter) return false;
     if (rosterTagFilter !== 'all' && !(c.tags || []).includes(rosterTagFilter)) return false;
     return true;
   });
@@ -2691,6 +3077,7 @@ async function renderCoachHomeTab() {
   document.querySelectorAll('[data-manage-client]').forEach(btn => {
     btn.addEventListener('click', () => {
       selectedClientId = btn.dataset.manageClient;
+      clientDetailView = 'overview';
       coachView = 'clientDetail';
       renderActiveCoachView();
     });
@@ -2709,34 +3096,50 @@ async function renderCoachHomeTab() {
 function renderRosterSection() {
   const allTags = [...new Set(coachClients.flatMap(c => c.tags || []))].sort();
   const pendingWithPhone = coachClients.filter(c => !c.fee_paid && c.phone);
+  const statusCounts = {
+    all: coachClients.length,
+    active: coachClients.filter(c => (c.program_status || 'active') === 'active').length,
+    on_hold: coachClients.filter(c => c.program_status === 'on_hold').length,
+    completed: coachClients.filter(c => c.program_status === 'completed').length
+  };
+  const statusTabs = [
+    { id: 'all', label: 'All' },
+    { id: 'active', label: 'Active' },
+    { id: 'on_hold', label: 'On Hold' },
+    { id: 'completed', label: 'Completed' }
+  ];
 
   return `
     <section>
-      <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Client roster</h2>
-      <p class="text-sm text-slate-500 mb-4">${coachClients.length} registered client${coachClients.length === 1 ? '' : 's'}.</p>
-      ${renderRosterStats()}
+      <div class="flex items-center justify-between mb-4">
+        <h1 class="font-display text-xl font-semibold text-slate-900">Clients</h1>
+        <span class="text-xs text-slate-400">${coachClients.length} total</span>
+      </div>
 
-      <div class="flex flex-col gap-2 mb-4">
-        <input type="text" id="roster-search" value="${escapeAttr(rosterSearch)}" placeholder="Search by name or email..."
-          class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
-        <div class="flex gap-2 flex-wrap">
-          <select id="roster-status-filter" class="text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-slate-600">
-            <option value="all" ${rosterStatusFilter === 'all' ? 'selected' : ''}>All statuses</option>
-            <option value="paid" ${rosterStatusFilter === 'paid' ? 'selected' : ''}>Paid</option>
-            <option value="pending" ${rosterStatusFilter === 'pending' ? 'selected' : ''}>Pending</option>
+      <input type="text" id="roster-search" value="${escapeAttr(rosterSearch)}" placeholder="Search clients..."
+        class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500 mb-3" />
+
+      <div class="flex gap-2 overflow-x-auto pb-1 mb-3" style="scrollbar-width:none;">
+        ${statusTabs.map(t => `
+          <button data-roster-status="${t.id}" class="shrink-0 text-xs font-medium px-3 py-1.5 rounded-full border transition
+            ${rosterStatusFilter === t.id ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-slate-300 text-slate-600'}">
+            ${t.label} (${statusCounts[t.id]})
+          </button>
+        `).join('')}
+      </div>
+
+      <div class="flex gap-2 flex-wrap mb-4">
+        ${allTags.length ? `
+          <select id="roster-tag-filter" class="text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-slate-600">
+            <option value="all" ${rosterTagFilter === 'all' ? 'selected' : ''}>All tags</option>
+            ${allTags.map(t => `<option value="${escapeAttr(t)}" ${rosterTagFilter === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('')}
           </select>
-          ${allTags.length ? `
-            <select id="roster-tag-filter" class="text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-slate-600">
-              <option value="all" ${rosterTagFilter === 'all' ? 'selected' : ''}>All tags</option>
-              ${allTags.map(t => `<option value="${escapeAttr(t)}" ${rosterTagFilter === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('')}
-            </select>
-          ` : ''}
-          ${pendingWithPhone.length ? `
-            <button id="bulk-whatsapp-btn" class="ml-auto text-xs font-medium text-emerald-700 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg px-3 py-2 transition">
-              Message ${pendingWithPhone.length} pending on WhatsApp
-            </button>
-          ` : ''}
-        </div>
+        ` : ''}
+        ${pendingWithPhone.length ? `
+          <button id="bulk-whatsapp-btn" class="ml-auto text-xs font-medium text-emerald-700 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg px-3 py-2 transition">
+            Message ${pendingWithPhone.length} pending on WhatsApp
+          </button>
+        ` : ''}
       </div>
 
       <div class="flex flex-col gap-3" id="roster-list-container">
@@ -2823,8 +3226,9 @@ function attachActiveCoachViewHandlers() {
     const refreshRosterList = () => { document.getElementById('roster-list-container').innerHTML = renderRosterList(); attachRosterCardHandlers(); };
     const searchInput = document.getElementById('roster-search');
     if (searchInput) searchInput.addEventListener('input', (e) => { rosterSearch = e.target.value; refreshRosterList(); });
-    const statusFilter = document.getElementById('roster-status-filter');
-    if (statusFilter) statusFilter.addEventListener('change', (e) => { rosterStatusFilter = e.target.value; refreshRosterList(); });
+    document.querySelectorAll('[data-roster-status]').forEach(btn => {
+      btn.addEventListener('click', () => { rosterStatusFilter = btn.dataset.rosterStatus; renderActiveCoachView(); });
+    });
     const tagFilter = document.getElementById('roster-tag-filter');
     if (tagFilter) tagFilter.addEventListener('change', (e) => { rosterTagFilter = e.target.value; refreshRosterList(); });
     const bulkWaBtn = document.getElementById('bulk-whatsapp-btn');
@@ -2862,34 +3266,47 @@ function renderClientCard(c) {
     ? `<span class="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Paid</span>`
     : `<span class="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Pending</span>`;
 
+  const statusMap = {
+    active: { label: 'Active', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    on_hold: { label: 'On Hold', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+    completed: { label: 'Completed', cls: 'bg-slate-100 text-slate-500 border-slate-200' }
+  };
+  const status = statusMap[c.program_status || 'active'];
+
   const lastActive = c.last_active ? timeAgo(c.last_active) : 'Never';
   const displayName = c.name || c.email;
 
   return `
     <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex items-center justify-between gap-3">
-      <button data-manage-client="${c.id}" class="min-w-0 text-left flex-1">
-        <div class="flex items-center gap-2 flex-wrap">
-          <h3 class="font-medium text-slate-900 text-sm truncate">${escapeHtml(displayName)}</h3>
-          ${paidBadge}
-        </div>
-        <p class="text-xs text-slate-500 mt-1">Active ${lastActive}</p>
-        ${c.tags && c.tags.length ? `
-          <div class="flex flex-wrap gap-1 mt-1.5">
-            ${c.tags.map(t => `<span class="text-[10px] font-medium bg-slate-100 text-slate-600 rounded-full px-2 py-0.5">${escapeHtml(t)}</span>`).join('')}
+      <button data-manage-client="${c.id}" class="min-w-0 text-left flex-1 flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center font-medium text-sm shrink-0">${escapeHtml(displayName.charAt(0).toUpperCase())}</div>
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <h3 class="font-medium text-slate-900 text-sm truncate">${escapeHtml(displayName)}</h3>
+            <span class="text-xs font-medium px-2 py-0.5 rounded-full border ${status.cls}">${status.label}</span>
           </div>
-        ` : ''}
+          <p class="text-xs text-slate-500 mt-0.5">${escapeHtml(c.goal_label || 'General Fitness')} · Active ${lastActive}</p>
+          ${c.tags && c.tags.length ? `
+            <div class="flex flex-wrap gap-1 mt-1.5">
+              ${c.tags.map(t => `<span class="text-[10px] font-medium bg-slate-100 text-slate-600 rounded-full px-2 py-0.5">${escapeHtml(t)}</span>`).join('')}
+            </div>
+          ` : ''}
+        </div>
       </button>
-      <div class="flex items-center gap-2 shrink-0">
-        <button data-toggle-paid="${c.id}" data-current-paid="${c.fee_paid}"
-          class="text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:border-emerald-400 hover:text-emerald-600 transition">
-          Mark ${c.fee_paid ? 'unpaid' : 'paid'}
-        </button>
-        ${c.phone ? `
-          <a href="https://wa.me/${escapeAttr(c.phone.replace(/[^0-9]/g, ''))}" target="_blank" rel="noopener noreferrer"
-            class="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500 text-white border border-emerald-500 hover:bg-emerald-600 transition">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0012.04 2zm0 18.15h-.01a8.2 8.2 0 01-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.2 8.2 0 01-1.26-4.38c0-4.54 3.7-8.24 8.25-8.24 2.2 0 4.27.86 5.83 2.42a8.18 8.18 0 012.41 5.83c0 4.55-3.7 8.23-8.24 8.23zm4.52-6.16c-.25-.12-1.47-.72-1.69-.81-.23-.08-.4-.12-.56.13-.17.25-.64.81-.79.97-.14.17-.29.19-.54.06-.25-.12-1.05-.39-2-1.23-.74-.66-1.24-1.47-1.39-1.72-.14-.25-.02-.38.11-.51.11-.11.25-.29.37-.43.12-.14.16-.25.25-.41.08-.17.04-.31-.02-.43-.06-.12-.56-1.35-.77-1.85-.2-.48-.41-.42-.56-.43-.14-.01-.31-.01-.48-.01-.17 0-.43.06-.66.31-.23.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.17 1.75 2.67 4.24 3.74.59.26 1.06.41 1.42.52.6.19 1.14.16 1.57.1.48-.07 1.47-.6 1.68-1.18.21-.58.21-1.07.14-1.18-.06-.1-.23-.16-.48-.28z"/></svg>
-          </a>
-        ` : ''}
+      <div class="flex flex-col items-end gap-2 shrink-0">
+        ${paidBadge}
+        <div class="flex items-center gap-2">
+          <button data-toggle-paid="${c.id}" data-current-paid="${c.fee_paid}"
+            class="text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:border-emerald-400 hover:text-emerald-600 transition">
+            ${c.fee_paid ? 'Unpaid' : 'Paid'}
+          </button>
+          ${c.phone ? `
+            <a href="https://wa.me/${escapeAttr(c.phone.replace(/[^0-9]/g, ''))}" target="_blank" rel="noopener noreferrer"
+              class="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500 text-white border border-emerald-500 hover:bg-emerald-600 transition">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0012.04 2zm0 18.15h-.01a8.2 8.2 0 01-4.19-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.2 8.2 0 01-1.26-4.38c0-4.54 3.7-8.24 8.25-8.24 2.2 0 4.27.86 5.83 2.42a8.18 8.18 0 012.41 5.83c0 4.55-3.7 8.23-8.24 8.23zm4.52-6.16c-.25-.12-1.47-.72-1.69-.81-.23-.08-.4-.12-.56.13-.17.25-.64.81-.79.97-.14.17-.29.19-.54.06-.25-.12-1.05-.39-2-1.23-.74-.66-1.24-1.47-1.39-1.72-.14-.25-.02-.38.11-.51.11-.11.25-.29.37-.43.12-.14.16-.25.25-.41.08-.17.04-.31-.02-.43-.06-.12-.56-1.35-.77-1.85-.2-.48-.41-.42-.56-.43-.14-.01-.31-.01-.48-.01-.17 0-.43.06-.66.31-.23.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.17 1.75 2.67 4.24 3.74.59.26 1.06.41 1.42.52.6.19 1.14.16 1.57.1.48-.07 1.47-.6 1.68-1.18.21-.58.21-1.07.14-1.18-.06-.1-.23-.16-.48-.28z"/></svg>
+            </a>
+          ` : ''}
+        </div>
       </div>
     </div>
   `;
@@ -3378,14 +3795,15 @@ async function renderClientDetailSection(clientId) {
   const client = coachClients.find(c => c.id === clientId);
   if (!client) { coachView = 'roster'; renderActiveCoachView(); return; }
 
-  const [workoutsRes, logsRes, completionsRes, photosRes, setLogsRes, bodyCompRes, sessionsRes] = await Promise.all([
+  const [workoutsRes, logsRes, completionsRes, photosRes, setLogsRes, bodyCompRes, sessionsRes, mealsRes] = await Promise.all([
     sb.from('workouts').select('*').eq('client_id', clientId).order('created_at', { ascending: false }),
     sb.from('progress_logs').select('*').eq('client_id', clientId).order('logged_at', { ascending: false }).limit(20),
     sb.from('workout_completions').select('*').eq('client_id', clientId).order('completed_date', { ascending: false }).limit(120),
     sb.from('progress_photos').select('*').eq('client_id', clientId).order('taken_at', { ascending: false }).limit(9),
     sb.from('workout_set_logs').select('*').eq('client_id', clientId).order('logged_date', { ascending: false }).limit(500),
     sb.from('body_composition_logs').select('*').eq('client_id', clientId).order('report_date', { ascending: false }).limit(30),
-    sb.from('workout_sessions').select('*').eq('client_id', clientId).order('session_date', { ascending: false }).limit(30)
+    sb.from('workout_sessions').select('*').eq('client_id', clientId).order('session_date', { ascending: false }).limit(30),
+    sb.from('meal_logs').select('*').eq('client_id', clientId).eq('log_date', toDateStr(new Date()))
   ]);
 
   const workouts = workoutsRes.data || [];
@@ -3395,6 +3813,7 @@ async function renderClientDetailSection(clientId) {
   const clientSetLogs = setLogsRes.data || [];
   const bodyComp = bodyCompRes.data || [];
   const sessions = (sessionsRes.data || []).filter(s => s.ended_at);
+  const todaysMeals = mealsRes.data || [];
   const loggedExercises = [...new Set(clientSetLogs.filter(s => s.weight).map(s => s.exercise_name))].sort();
   const otherClients = coachClients.filter(c => c.id !== clientId);
 
@@ -3414,7 +3833,18 @@ async function renderClientDetailSection(clientId) {
     hasPhoto: photos.length > 0
   });
 
-  const clientDetailData = { client, workouts, logs, completions, photos, clientSetLogs, bodyComp, sessions, loggedExercises, otherClients, badges, clientId };
+  const clientDetailData = { client, workouts, logs, completions, photos, clientSetLogs, bodyComp, sessions, todaysMeals, loggedExercises, otherClients, badges, clientId };
+
+  const weightPoints = logs.filter(l => l.weight !== null && l.weight !== undefined).slice().reverse();
+  const latestWeight = weightPoints.length ? weightPoints[weightPoints.length - 1].weight : null;
+  const daysAsClient = Math.max(0, Math.floor((Date.now() - new Date(client.created_at || Date.now()).getTime()) / 86400000));
+  const weeksAsClient = Math.max(1, Math.round(daysAsClient / 7));
+  const statusMap = {
+    active: { label: 'Active', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+    on_hold: { label: 'On Hold', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+    completed: { label: 'Completed', cls: 'bg-slate-100 text-slate-500 border-slate-200' }
+  };
+  const status = statusMap[client.program_status || 'active'];
 
   viewOutlet.innerHTML = `
     <button id="back-to-roster" class="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 mb-4">
@@ -3422,16 +3852,35 @@ async function renderClientDetailSection(clientId) {
       All clients
     </button>
 
-    <div class="flex items-center justify-between gap-2 mb-1">
-      <h1 class="font-display text-xl font-semibold text-slate-900 truncate">${escapeHtml(client.name || client.email)}</h1>
-      <div class="shrink-0 flex items-center gap-2">
-        ${streak > 0 ? `<span class="flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1.5">🔥 ${streak}</span>` : ''}
+    <div class="flex flex-col items-center text-center mb-5">
+      <div class="w-16 h-16 rounded-full bg-emerald-500 text-white flex items-center justify-center font-display font-semibold text-2xl mb-3">${escapeHtml((client.name || client.email).charAt(0).toUpperCase())}</div>
+      <h1 class="font-display text-xl font-semibold text-slate-900">${escapeHtml(client.name || client.email)}</h1>
+      <p class="text-sm text-slate-500 mt-0.5">${escapeHtml(client.goal_label || 'General Fitness')}</p>
+      <div class="flex items-center gap-2 mt-2 flex-wrap justify-center">
+        <span class="text-xs font-medium px-2.5 py-1 rounded-full border ${status.cls}">${status.label}</span>
+        ${streak > 0 ? `<span class="flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-1">🔥 ${streak}</span>` : ''}
       </div>
     </div>
+
+    <div class="grid grid-cols-3 gap-2 mb-5">
+      <div class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-sm">
+        <p class="text-lg font-semibold text-slate-900">${latestWeight !== null ? latestWeight : '—'}</p>
+        <p class="text-[10px] text-slate-500 mt-0.5">Current (kg)</p>
+      </div>
+      <div class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-sm">
+        <p class="text-lg font-semibold text-slate-900">${client.target_weight_kg ?? '—'}</p>
+        <p class="text-[10px] text-slate-500 mt-0.5">Goal (kg)</p>
+      </div>
+      <div class="bg-white border border-slate-200 rounded-2xl p-3 text-center shadow-sm">
+        <p class="text-lg font-semibold text-slate-900">${weeksAsClient}</p>
+        <p class="text-[10px] text-slate-500 mt-0.5">Weeks active</p>
+      </div>
+    </div>
+
     <p class="text-sm text-slate-500 mb-4">${adherence.completed}/${adherence.expected} training days hit this week · ${badges.filter(b => b.earned).length}/${badges.length} badges earned</p>
 
     <div class="flex bg-slate-100 rounded-xl p-1 mb-6">
-      ${[{ id: 'overview', label: 'Overview' }, { id: 'plan', label: 'Plan' }, { id: 'progress', label: 'Progress' }].map(t => `
+      ${[{ id: 'overview', label: 'Overview' }, { id: 'plan', label: 'Plan' }, { id: 'progress', label: 'Progress' }, { id: 'chat', label: 'Chat' }].map(t => `
         <button data-client-detail-tab="${t.id}" class="flex-1 py-2.5 rounded-lg text-sm font-medium transition ${clientDetailView === t.id ? 'bg-emerald-500 text-white' : 'text-slate-500'}">
           ${t.label}
         </button>
@@ -3443,9 +3892,14 @@ async function renderClientDetailSection(clientId) {
 
   document.getElementById('back-to-roster').addEventListener('click', () => { coachView = 'roster'; selectedClientId = null; renderActiveCoachView(); });
   document.querySelectorAll('[data-client-detail-tab]').forEach(btn => {
-    btn.addEventListener('click', () => { clientDetailView = btn.dataset.clientDetailTab; renderClientDetailSection(clientId); });
+    btn.addEventListener('click', () => {
+      clientDetailView = btn.dataset.clientDetailTab;
+      if (clientDetailView === 'chat') { openChatWith(client); return; }
+      renderClientDetailSection(clientId);
+    });
   });
 
+  if (clientDetailView === 'chat') { openChatWith(client); return; }
   renderClientDetailActiveTab(clientDetailData);
 }
 
@@ -3458,10 +3912,17 @@ function renderClientDetailActiveTab(d) {
 }
 
 function renderClientDetailOverview(d) {
-  const { client, workouts, otherClients, clientId, clientSetLogs, completions } = d;
+  const { client, workouts, otherClients, clientId, clientSetLogs, completions, todaysMeals } = d;
   const restDays = client.rest_days || [];
   const lifetimeStats = computeLifetimeStats(clientSetLogs, completions);
   const muscleBreakdown = computeMuscleBreakdown(clientSetLogs);
+  const mealTotals = (todaysMeals || []).reduce((acc, m) => ({
+    calories: acc.calories + (parseFloat(m.calories) || 0),
+    protein: acc.protein + (parseFloat(m.protein_g) || 0),
+    carbs: acc.carbs + (parseFloat(m.carbs_g) || 0),
+    fats: acc.fats + (parseFloat(m.fats_g) || 0)
+  }), { calories: 0, protein: 0, carbs: 0, fats: 0 });
+
   return `
     <section class="mb-8">
       <h2 class="font-display text-lg font-semibold text-slate-900 mb-4">Stats</h2>
@@ -3472,6 +3933,23 @@ function renderClientDetailOverview(d) {
           ${renderMuscleBreakdownCard(muscleBreakdown)}
         </div>
       </div>
+    </section>
+
+    <section class="mb-8">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-display text-lg font-semibold text-slate-900">Today's nutrition</h2>
+        <span class="text-xs text-slate-400">Goal: ${client.calorie_goal ?? 2000} kcal</span>
+      </div>
+      ${todaysMeals && todaysMeals.length ? `
+        <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+          ${renderCalorieRing(mealTotals.calories, client.calorie_goal || 2000)}
+          <div class="flex flex-col gap-3 mt-4">
+            ${renderMacroBar('Protein', mealTotals.protein, client.protein_goal_g || 150, '#10b981')}
+            ${renderMacroBar('Carbs', mealTotals.carbs, client.carbs_goal_g || 250, '#f59e0b')}
+            ${renderMacroBar('Fats', mealTotals.fats, client.fats_goal_g || 70, '#8b5cf6')}
+          </div>
+        </div>
+      ` : `<div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm text-center text-sm text-slate-400">No meals logged today yet.</div>`}
     </section>
 
     <section class="mb-8">
@@ -3497,6 +3975,14 @@ function renderClientDetailOverview(d) {
           <input type="text" id="edit-goal-label" value="${escapeAttr(client.goal_label || '')}" placeholder="e.g. Lose Weight, Build Muscle"
             class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
         </div>
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">Program status</label>
+          <select id="edit-program-status"
+            class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500">
+            ${[['active', 'Active'], ['on_hold', 'On Hold'], ['completed', 'Completed']].map(([val, lbl]) =>
+              `<option value="${val}" ${(client.program_status || 'active') === val ? 'selected' : ''}>${lbl}</option>`).join('')}
+          </select>
+        </div>
         <div class="grid grid-cols-3 gap-3">
           <div>
             <label class="text-xs text-slate-500 mb-1 block">Target (kg)</label>
@@ -3512,6 +3998,31 @@ function renderClientDetailOverview(d) {
             <label class="text-xs text-slate-500 mb-1 block">Water goal (L)</label>
             <input type="number" step="0.1" id="edit-water-goal" value="${escapeAttr(client.water_goal_liters ?? 2.5)}" placeholder="2.5"
               class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500" />
+          </div>
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 mb-2 block">Daily nutrition goals</label>
+          <div class="grid grid-cols-4 gap-2">
+            <div>
+              <label class="text-[10px] text-slate-400 mb-1 block">Kcal</label>
+              <input type="number" step="50" id="edit-calorie-goal" value="${escapeAttr(client.calorie_goal ?? 2000)}"
+                class="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/60" />
+            </div>
+            <div>
+              <label class="text-[10px] text-slate-400 mb-1 block">Protein g</label>
+              <input type="number" step="5" id="edit-protein-goal" value="${escapeAttr(client.protein_goal_g ?? 150)}"
+                class="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/60" />
+            </div>
+            <div>
+              <label class="text-[10px] text-slate-400 mb-1 block">Carbs g</label>
+              <input type="number" step="5" id="edit-carbs-goal" value="${escapeAttr(client.carbs_goal_g ?? 250)}"
+                class="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/60" />
+            </div>
+            <div>
+              <label class="text-[10px] text-slate-400 mb-1 block">Fats g</label>
+              <input type="number" step="5" id="edit-fats-goal" value="${escapeAttr(client.fats_goal_g ?? 70)}"
+                class="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/60" />
+            </div>
           </div>
         </div>
         <div>
@@ -3598,7 +4109,7 @@ function renderClientDetailPlan(d) {
 }
 
 function renderClientDetailProgress(d) {
-  const { badges, photos, bodyComp, logs, sessions } = d;
+  const { client, badges, photos, bodyComp, logs, sessions } = d;
   return `
     ${sessions.length ? `
     <section class="mb-8">
@@ -3607,6 +4118,12 @@ function renderClientDetailProgress(d) {
       ${renderSessionHistoryList(sessions)}
     </section>
     ` : ''}
+
+    <section class="mb-8">
+      <h2 class="font-display text-lg font-semibold text-slate-900 mb-1">Activity</h2>
+      <p class="text-sm text-slate-500 mb-4">Daily steps over the last week.</p>
+      ${renderStepsTrendChart(logs, client.steps_goal || 8000)}
+    </section>
 
     <section class="mb-8">
       ${renderBadgesSection(badges)}
@@ -3818,6 +4335,10 @@ async function handleEditClient(e, clientId) {
     const targetWeightVal = document.getElementById('edit-target-weight').value;
     const stepsGoalVal = document.getElementById('edit-steps-goal').value;
     const waterGoalVal = document.getElementById('edit-water-goal').value;
+    const calorieGoalVal = document.getElementById('edit-calorie-goal').value;
+    const proteinGoalVal = document.getElementById('edit-protein-goal').value;
+    const carbsGoalVal = document.getElementById('edit-carbs-goal').value;
+    const fatsGoalVal = document.getElementById('edit-fats-goal').value;
     const { error } = await sb.from('profiles').update({
       name: document.getElementById('edit-name').value.trim() || null,
       phone: document.getElementById('edit-phone').value.trim() || null,
@@ -3825,9 +4346,14 @@ async function handleEditClient(e, clientId) {
       rest_days: restDays,
       tags,
       goal_label: document.getElementById('edit-goal-label').value.trim() || null,
+      program_status: document.getElementById('edit-program-status').value,
       target_weight_kg: targetWeightVal ? parseFloat(targetWeightVal) : null,
       steps_goal: stepsGoalVal ? parseInt(stepsGoalVal, 10) : 8000,
-      water_goal_liters: waterGoalVal ? parseFloat(waterGoalVal) : 2.5
+      water_goal_liters: waterGoalVal ? parseFloat(waterGoalVal) : 2.5,
+      calorie_goal: calorieGoalVal ? parseFloat(calorieGoalVal) : 2000,
+      protein_goal_g: proteinGoalVal ? parseFloat(proteinGoalVal) : 150,
+      carbs_goal_g: carbsGoalVal ? parseFloat(carbsGoalVal) : 250,
+      fats_goal_g: fatsGoalVal ? parseFloat(fatsGoalVal) : 70
     }).eq('id', clientId);
     if (error) throw error;
     toast('Client updated.', 'success');
